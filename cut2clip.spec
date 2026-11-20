@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the Shorts app.
+"""PyInstaller spec for Cut2Clip.
 
 One-file, windowed build. The models folder (BlazeFace, YOLOv8n)
 ships as data; ffmpeg/ffprobe and, on Linux, the MediaPipe system
 libraries ship as binaries. The app puts the bundle folder first
 on PATH at startup so every subprocess call finds them.
 
-Build on Linux:  pyinstaller shorts-app.spec
+Build on Linux:  pyinstaller cut2clip.spec
 Build on Windows: same command, from packaging/build-windows.md.
 """
 
@@ -87,6 +87,10 @@ a = Analysis(
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# The C2C icon (packaging/icon.ico) is embedded in the exe on
+# Windows; on other platforms PyInstaller ignores it.
+EXE_ICON = str(HERE / "packaging" / "icon.ico") if sys.platform.startswith("win") else None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -94,7 +98,8 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="shorts-app",
+    name="cut2clip",
+    icon=EXE_ICON,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

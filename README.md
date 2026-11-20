@@ -1,6 +1,6 @@
-# Shorts App
+# Cut2Clip
 
-Shorts App is a free, open-source desktop app for Windows (macOS
+Cut2Clip is a free, open-source desktop app for Windows (macOS
 second) that turns video and live stream URLs into ready-to-post
 40-second vertical Shorts and Reels (9:16, 1080x1920, H.264/AAC,
 MP4).
@@ -71,8 +71,8 @@ model, device, Z threshold) are remembered between runs.
 ## Build the Windows exe
 See `packaging/build-windows.md`. In short:
 ```powershell
-pyinstaller shorts-app.spec
-# -> dist\shorts-app.exe
+pyinstaller cut2clip.spec
+# -> dist\cut2clip.exe
 ```
 
 ## Layout

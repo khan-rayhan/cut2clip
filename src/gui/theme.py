@@ -1,4 +1,4 @@
-"""Colorful, modern dark theme for the Shorts App GUI.
+"""Colorful, modern dark theme for the Cut2Clip GUI.
 
 One Qt style sheet, applied to the whole QApplication in
 ``src.gui_main`` so windows, dialogs and popups all match.
@@ -140,5 +140,5 @@ QMessageBox { background: #1d2040; }
 
 
 def apply_theme(app) -> None:
-    """Apply the Shorts App theme to a QApplication."""
+    """Apply the Cut2Clip theme to a QApplication."""
     app.setStyleSheet(STYLE)

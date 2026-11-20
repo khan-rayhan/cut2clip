@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
     def __init__(self, settings_org: str = ORG, settings_app: str = APP):
         super().__init__()
         from .. import __version__
-        self.setWindowTitle(f"Shorts App v{__version__} — 40-second vertical clips")
+        self.setWindowTitle(f"Cut2Clip v{__version__} — 40-second vertical clips")
         self.resize(760, 560)
         self.settings = QSettings(settings_org, settings_app)
         self._workers: list = []
@@ -52,7 +52,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
 
-        hero = QLabel("▶  Shorts App  •  40-second vertical Shorts & Reels")
+        hero = QLabel("▶  Cut2Clip  •  40-second vertical Shorts & Reels")
         hero.setObjectName("hero")
         layout.addWidget(hero)
 

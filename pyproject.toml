@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "shorts-app"
+name = "cut2clip"
 version = "0.1.0"
 description = "Desktop app that turns video and live stream URLs into 40-second vertical Shorts/Reels."
 requires-python = ">=3.10"

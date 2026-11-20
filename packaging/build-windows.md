@@ -1,4 +1,4 @@
-# Build the Shorts app on Windows
+# Build Cut2Clip on Windows
 
 The Windows .exe is built on a Windows PC from this same folder.
 The steps below were written for Rayhan's Windows PC, which has
@@ -17,7 +17,7 @@ an NVIDIA GPU.
 
 ## 2. Get the project
 
-Copy the `shorts-app` folder to the PC (USB, cloud drive, or git),
+Copy the `cut2clip` folder to the PC (USB, cloud drive, or git),
 then open a terminal inside it.
 
 ## 3. Create the environment
@@ -36,15 +36,15 @@ few minutes on first install.
 ## 4. Build the exe
 
 ```powershell
-pyinstaller shorts-app.spec
+pyinstaller cut2clip.spec
 ```
 
 The build takes several minutes. The result is
-`dist\shorts-app.exe` — a single file, no Python needed to run it.
+`dist\cut2clip.exe` — a single file, no Python needed to run it.
 
 ## 5. Run it
 
-Double-click `dist\shorts-app.exe`. First launch is slow (the
+Double-click `dist\cut2clip.exe`. First launch is slow (the
 one-file bundle unpacks itself). The window has a URL bar: paste
 a YouTube or Twitch URL, press Detect, and go.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.3 — 2026-11-20
+
+### Added
+- C2C app icon: bold white C2C letters with a violet-to-pink-to-orange glow on a dark navy tile, matching the GUI theme. The Windows installer and the exe now carry it.
+
+### Changed
+- Renamed the app from Shorts App to Cut2Clip: GitHub repo `khan-rayhan/shorts-app` → `khan-rayhan/cut2clip`, installer `Cut2Clip-Setup-*.exe`, exe `cut2clip.exe`, window title and hero text, CLI program name, and package name. Saved settings are kept (the settings location is unchanged).
+
 ## v1.0.2 — 2026-11-20
 
 ### Changed

@@ -81,7 +81,7 @@ def cmd_live(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="shorts-app",
+    parser = argparse.ArgumentParser(prog="cut2clip",
                                      description="40-second Shorts/Reels from URLs")
     sub = parser.add_subparsers(dest="command", required=True)
     p_probe = sub.add_parser("probe", help="Show metadata for a URL")
