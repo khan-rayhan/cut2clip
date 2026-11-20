@@ -17,8 +17,8 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from src.gui.main_window import MainWindow
-from src.gui.workers import LiveWorker, ProbeWorker, VodClipWorker
-from src.ingestion import VideoInfo
+from src.gui.workers import ClipsWorker, LiveWorker, ProbeWorker, VodClipWorker
+from src.ingestion import HeatPoint, IngestionError, VideoInfo
 
 
 @pytest.fixture(scope="module")
@@ -133,3 +133,90 @@ def test_window_detect_invalid_url(app):
                    timeout=20.0)
     assert ok, f"status stayed: {window.info_label.text()}"
     window.close()
+
+
+def test_caption_combo_and_roundtrip(app):
+    from PySide6.QtCore import QSettings
+
+    org, name = "ShortsAppTest", "TestCaptionStyle"
+    QSettings(org, name).clear()  # a previous run saved "neon" here
+    first = MainWindow(settings_org=org, settings_app=name)
+    assert first.caption_combo.count() == 4
+    assert [first.caption_combo.itemText(i) for i in range(4)] == [
+        "hormozi", "tiktok", "karaoke", "neon"]
+    assert first.caption_combo.currentText() == "hormozi"
+    first.caption_combo.setCurrentText("neon")
+    first._save_settings()
+    first.close()
+    second = MainWindow(settings_org=org, settings_app=name)
+    assert second.caption_combo.currentText() == "neon"
+    second.close()
+
+
+def test_auto_top3_processes_first_three_windows(app, tmp_path):
+    """Auto-clip top 3 queues exactly the first three windows,
+    ignoring the checkboxes, and finishes them all."""
+    from PySide6.QtCore import QThread, Signal
+
+    from src.highlights import ClipWindow
+
+    class FakeWorker(QThread):
+        progress = Signal(str)
+        finished_file = Signal(str)
+        failed = Signal(str)
+        created = []
+
+        def __init__(self, url, start, end, out_path, model="tiny",
+                     caption_style="hormozi"):
+            super().__init__()
+            self.out_path = out_path
+            FakeWorker.created.append(caption_style)
+
+        def run(self):
+            self.finished_file.emit(self.out_path)
+
+    window = MainWindow(settings_org="ShortsAppTest", settings_app="TestAuto3")
+    window.out_edit.setText(str(tmp_path))
+    window._current_url = "https://example.invalid/x"
+    window.caption_combo.setCurrentText("tiktok")
+    windows = [ClipWindow(start=float(10 + 40 * i), end=float(50 + 40 * i),
+                          peak_time=float(30 + 40 * i), score=0.9 - 0.1 * i,
+                          source="heatmap") for i in range(5)]
+    window._on_windows(windows)
+    assert window.auto_button.isEnabled()
+    with mock.patch("src.gui.main_window.VodClipWorker", FakeWorker):
+        window._on_auto_top3()
+        ok = _wait_for(lambda: window.outputs_list.count() == 3, timeout=10.0)
+    assert ok, f"outputs: {window.outputs_list.count()}"
+    assert window.auto_button.isEnabled()  # re-enabled when done
+    # The caption style picked in settings reached every worker.
+    assert FakeWorker.created == ["tiktok"] * 3
+    # Only the first three windows were processed, in order.
+    stamps = [window.outputs_list.item(i).text() for i in range(3)]
+    assert stamps[0].endswith("clip-00-10.mp4")
+    assert stamps[1].endswith("clip-00-50.mp4")
+    assert stamps[2].endswith("clip-01-30.mp4")
+    window.close()
+
+
+def test_clips_worker_falls_back_when_comments_fail(app):
+    """Comments disabled/unavailable must not break detection:
+    the worker falls back to the heatmap alone."""
+    fake = VideoInfo(url="https://example.invalid/x", title="Fake Video",
+                     duration=180.0, is_live=False,
+                     heatmap=[HeatPoint(58, 60, 1.0),
+                              HeatPoint(60, 62, 0.9),
+                              HeatPoint(138, 140, 0.8)],
+                     auto_caption_urls={})
+    received = {}
+    with mock.patch("src.ingestion.probe", return_value=fake), \
+         mock.patch("src.ingestion.fetch_comments",
+                    side_effect=IngestionError("comments disabled")):
+        worker = ClipsWorker("https://example.invalid/x")
+        worker.finished_windows.connect(
+            lambda w: received.setdefault("windows", w))
+        worker.failed.connect(lambda msg: received.setdefault("error", msg))
+        _run_worker(worker)
+    assert "error" not in received
+    assert received["windows"]
+    assert all(w.source == "heatmap" for w in received["windows"])

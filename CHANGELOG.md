@@ -1,18 +1,5 @@
 # Changelog
 
-## v1.0.3 — 2026-11-20
-
-### Added
-- C2C app icon: bold white C2C letters with a violet-to-pink-to-orange glow on a dark navy tile, matching the GUI theme. The Windows installer and the exe now carry it.
-
-### Changed
-- Renamed the app from Shorts App to Cut2Clip: GitHub repo `khan-rayhan/shorts-app` → `khan-rayhan/cut2clip`, installer `Cut2Clip-Setup-*.exe`, exe `cut2clip.exe`, window title and hero text, CLI program name, and package name. Saved settings are kept (the settings location is unchanged).
-
-## v1.0.2 — 2026-11-20
-
-### Changed
-- VOD section downloads now allow up to 1080p instead of 720p, preferring H.264 (`avc1`) with a fallback chain: `bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]`. A 40-second 1080p section is about 30–60 MB, so the download size is not a concern; the H.264 preference still avoids the VP9/webm downloads that stall on some proxies. Audio stays `m4a` on purpose — plain best-audio picks Opus/Vorbis, which cannot go into an MP4, so yt-dlp would switch the output to MKV instead.
-
 ## v1.0.1 — 2026-11-20
 
 ### Added
@@ -20,7 +7,16 @@
   buttons, styled tabs, lists and log. The live Start button turns
   red while monitoring is running.
 - GUI theme tests that build the main window offscreen and verify
-  the theme and a realistic VOD state render.
+  the theme and a realistic pre-recorded state render.
+- C2C app icon: bold white C2C letters with a violet-to-pink-to-orange glow on a dark navy tile, matching the GUI theme. The Windows installer and the exe now carry it.
+- Three new caption styles alongside Hormozi (still the default): **TikTok** — words cycle through bright pink, yellow, cyan and green, the current word pops bigger; **karaoke** — the current word is bright white and pops, un-sung words are dimmed grey; **neon** — bold white words with a thick cyan outline glow, the current word in magenta. Picked in the GUI settings (remembered between runs) or with the CLI `--caption-style` flag (`process` and `live`).
+- **Auto-clip top 3**: after Detect on a pre-recorded video, one button processes the top 3 highlight windows automatically — no ticking needed.
+- **Comment spikes** for pre-recorded ranking: comments that mention a timestamp ("1:23", "1:02:03") vote for that moment, so a scene viewers kept commenting on can outrank a slightly stronger replay peak nobody mentioned (60% heatmap + 40% comment density). Fetched with plain yt-dlp, no API key, capped at 100 comments; when comments are disabled or unavailable the heatmap alone is used.
+
+### Changed
+- Renamed the app from Shorts App to Cut2Clip: GitHub repo `khan-rayhan/shorts-app` → `khan-rayhan/cut2clip`, installer `Cut2Clip-Setup-*.exe`, exe `cut2clip.exe`, window title and hero text, CLI program name, and package name. Saved settings are kept (the settings location is unchanged).
+- Pre-recorded section downloads now allow up to 1080p instead of 720p, preferring H.264 (`avc1`) with a fallback chain: `bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]`. A 40-second 1080p section is about 30–60 MB, so the download size is not a concern; the H.264 preference still avoids the VP9/webm downloads that stall on some proxies. Audio stays `m4a` on purpose — plain best-audio picks Opus/Vorbis, which cannot go into an MP4, so yt-dlp would switch the output to MKV instead.
+- The mode formerly called "VOD" is now **Pre-Recorded** everywhere the user sees it: GUI tab and labels, CLI messages, README. Internal names (e.g. `VodClipWorker`) are unchanged.
 
 ### Fixed
 - Windows: captions failed to burn because the `.ass` path (`C:\...`) was passed to the ffmpeg filter unquoted. The path is now quoted and escaped.
@@ -30,6 +26,9 @@
 - `download_section` now checks the result with ffprobe and deletes it with an error if the file is far longer than requested.
 - `process_clip` and `Framer.reframe_video` used fixed temp file names, so two clips processed at once overwrote each other.
 - Closing the GUI or stopping the monitor no longer destroys a running worker thread, and the live buffer folder is deleted when monitoring stops.
+- **Live monitor could not resolve any live stream** ("Could not resolve stream" with an empty cause) on the installed app. Root cause: streamlink 8.x loads its 138 built-in plugins lazily from `plugins/_plugins.json` and the `streamlink/plugins/*.py` modules, and the PyInstaller spec only listed `streamlink` as a hidden import — the bundle shipped streamlink with no plugins at all, so every URL failed with an empty `NoPluginError` (reproduced locally with the plugin files stripped). The spec now uses `collect_all("streamlink")` (it has no PyInstaller hook, so this is safe) plus the streamlink dist-info so the lazy-load checksum can run.
+- Same class of bug, found by audit: `ctranslate2` has no hook either, and on Windows it glob-loads `*.dll` files out of its own package directory with `ctypes` — invisible to static analysis. The spec now uses `collect_all("ctranslate2")` too.
+- As a backup for live resolving, `resolve_stream_url` now falls back to yt-dlp when streamlink fails or finds no stream, and the error names both causes instead of an empty message. The GUI live log now shows the full traceback for a monitor failure, so a future failure is diagnosable from the log alone.
 
 ## v1.0.0 — 2026-11-18
 

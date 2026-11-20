@@ -6,12 +6,15 @@ second) that turns video and live stream URLs into ready-to-post
 MP4).
 
 Paste a link and it does the rest: for recorded videos it finds the
-best moments from YouTube's Most Replayed heatmap (with an
-audio-energy and transcript fallback); for live streams it watches
-the chat and cuts a 40-second clip around every spike. Each clip is
-auto-framed on the speaker with MediaPipe and YOLOv8, smoothed so
-the camera never jumps, and captioned word by word in Hormozi style
-with faster-whisper — all running locally on your PC, no cloud, no
+best moments from YouTube's Most Replayed heatmap, boosted by
+comment spikes — moments lots of viewers commented on with a
+timestamp ("1:23", "1:02:03") count extra (with an audio-energy and
+transcript fallback when there is no heatmap); for live streams it
+watches the chat and cuts a 40-second clip around every spike. Each
+clip is auto-framed on the speaker with MediaPipe and YOLOv8,
+smoothed so the camera never jumps, and captioned word by word in
+your choice of Hormozi, TikTok, karaoke or neon style with
+faster-whisper — all running locally on your PC, no cloud, no
 watermark, no subscription.
 
 Just install, paste a link, and your clips are ready. Built with the
@@ -28,7 +31,7 @@ GSD workflow — see `.planning/`.
 - **Phase 4 done**: PySide6 GUI plus PyInstaller packaging
   (one-file bundle, smoke-tested).
 - **Phase 5 done**: full verification — 33 tests pass, a real
-  40-second VOD clip processed end to end
+  40-second pre-recorded clip processed end to end
   (`demo/rick-40s-vertical.mp4`: 1080x1920, H.264/AAC, exactly
   40.000s, face-centred framing, Hormozi captions burned in).
   See `.planning/phase-5/VERIFICATION.md`.
@@ -45,18 +48,27 @@ python3 -m venv .venv
 ```bash
 .venv/bin/python -m src.gui_main
 ```
-Paste a URL, press Detect. A VOD shows its ranked 40-second
+Paste a URL, press Detect. A pre-recorded video shows its ranked 40-second
 highlight windows — tick the ones you want and press Process
-selected. A live stream shows the monitor tab — Start monitoring
+selected, or press Auto-clip top 3 to process the best three at
+once with no ticking. A live stream shows the monitor tab — Start monitoring
 and clips appear as chat spikes. Settings (output folder, whisper
-model, device, Z threshold) are remembered between runs.
+model, caption style, device, Z threshold) are remembered between runs.
+
+Pre-recorded ranking uses YouTube's Most Replayed heatmap boosted
+by comment spikes: comments that mention a timestamp ("1:23",
+"1:02:03") vote for that moment, so a scene viewers kept
+commenting on outranks a slightly stronger replay peak nobody
+mentioned. At most 100 comments are fetched (no API key, plain
+yt-dlp); when comments are disabled or unavailable the heatmap
+alone is used.
 
 ## Command line
 ```bash
-# Show metadata for a URL (VOD vs live, heatmap, captions)
+# Show metadata for a URL (pre-recorded vs live, heatmap, captions)
 .venv/bin/python -m src.cli probe "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Ranked 40-second highlight windows (heatmap, else audio + transcript fallback;
+# Ranked 40-second highlight windows (heatmap + comment spikes, else audio + transcript fallback;
 # the audio is streamed and scored in memory, never saved)
 .venv/bin/python -m src.cli clips "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -n 3
 
@@ -65,6 +77,7 @@ model, device, Z threshold) are remembered between runs.
 .venv/bin/python -m src.cli live "<live url>" --seconds 600 --out live-clips
 
 # Reframe a local clip to 1080x1920 and burn captions
+# (--caption-style hormozi|tiktok|karaoke|neon, default hormozi)
 .venv/bin/python -m src.cli process input.mp4 --out vertical.mp4 --model tiny
 ```
 
@@ -78,7 +91,7 @@ pyinstaller cut2clip.spec
 ## Layout
 ```
 src/
-  ingestion.py    yt-dlp probe, VOD/live detection, audio/section download
+  ingestion.py    yt-dlp probe, pre-recorded/live detection, audio/section download
   highlights.py   heatmap peaks, audio energy, transcript hooks, windows
   live_chat.py    chat velocity (Z-score) and live chat reader
   ring_buffer.py  rolling 80s buffer via streamlink + ffmpeg

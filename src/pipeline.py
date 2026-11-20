@@ -16,6 +16,7 @@ def process_clip(input_path: str, output_path: str,
                  model: str = "tiny",
                  do_reframe: bool = True,
                  do_captions: bool = True,
+                 caption_style: str = "hormozi",
                  log=print) -> str:
     """Full pipeline. Returns the output path. ``log`` receives the
     progress lines; the GUI passes a callback that forwards them to
@@ -23,7 +24,7 @@ def process_clip(input_path: str, output_path: str,
     started = time.time()
     current = input_path
     # One private folder per call, so two clips processed at the same
-    # time (live monitor plus a VOD job) never overwrite each other.
+    # time (live monitor plus a pre-recorded job) never overwrite each other.
     work = tempfile.mkdtemp(prefix="shorts-")
     try:
         if do_reframe:
@@ -40,7 +41,7 @@ def process_clip(input_path: str, output_path: str,
             words = captions.transcribe_words(current, model=model)
             log(f"Transcribed {len(words)} words in {time.time() - step:.1f}s")
             ass_path = os.path.join(work, "captions.ass")
-            captions.words_to_ass(words, ass_path)
+            captions.words_to_ass(words, ass_path, style=caption_style)
             captioned = os.path.join(work, "captioned.mp4")
             captions.burn_captions(current, ass_path, captioned)
             log(f"Captions burned in {time.time() - step:.1f}s")

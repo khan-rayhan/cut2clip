@@ -78,3 +78,92 @@ def test_ring_buffer_live(tmp_path):
         assert abs(_duration(str(out)) - 40.0) < 0.6
     finally:
         buf.stop()
+
+
+# ------------------------------------------------------- stream URL resolving
+
+def _broken_streamlink(monkeypatch):
+    """Replace the ``streamlink`` module with one whose session
+    always fails, as it did for the YouTube live URL on 2026-11-20.
+    Works whether or not streamlink is installed in this venv."""
+    import sys
+    import types
+
+    fake = types.ModuleType("streamlink")
+
+    class BrokenSession:
+        def streams(self, url):
+            raise RuntimeError("No plugin can handle URL")
+
+    fake.Streamlink = BrokenSession
+    monkeypatch.setitem(sys.modules, "streamlink", fake)
+
+
+def test_resolve_falls_back_to_ytdlp_when_streamlink_fails(monkeypatch):
+    from src.ring_buffer import resolve_stream_url
+
+    _broken_streamlink(monkeypatch)
+    monkeypatch.setattr(
+        "src.ring_buffer._resolve_with_ytdlp",
+        lambda url: "https://example.invalid/live.m3u8")
+    assert resolve_stream_url("https://www.youtube.com/live/OIeLbmyraRQ") == \
+        "https://example.invalid/live.m3u8"
+
+
+def test_resolve_error_names_both_failures(monkeypatch):
+    from src.ring_buffer import RingBufferError, resolve_stream_url
+
+    _broken_streamlink(monkeypatch)
+
+    def boom(url):
+        raise RuntimeError("yt-dlp: ERROR: Video unavailable")
+
+    monkeypatch.setattr("src.ring_buffer._resolve_with_ytdlp", boom)
+    with pytest.raises(RingBufferError) as excinfo:
+        resolve_stream_url("https://www.youtube.com/live/OIeLbmyraRQ")
+    msg = str(excinfo.value)
+    assert "streamlink failed: No plugin can handle URL" in msg
+    assert "yt-dlp fallback also failed" in msg
+    assert "yt-dlp: ERROR: Video unavailable" in msg
+
+
+def test_ytdlp_fallback_prefers_hls_format(monkeypatch):
+    from src.ring_buffer import _resolve_with_ytdlp
+
+    def fake_extract(url, opts, download):
+        return {"formats": [
+            {"ext": "mp4", "protocol": "https",
+             "url": "https://example.invalid/video.mp4"},
+            {"ext": "m3u8", "protocol": "m3u8_native",
+             "url": "https://example.invalid/low.m3u8"},
+            {"ext": "m3u8", "protocol": "m3u8_native",
+             "url": "https://example.invalid/best.m3u8"},
+        ], "url": "https://example.invalid/video.mp4"}
+
+    monkeypatch.setattr("src.ingestion._extract", fake_extract)
+    # The last (best) HLS format wins.
+    assert _resolve_with_ytdlp("https://www.youtube.com/live/x") == \
+        "https://example.invalid/best.m3u8"
+
+
+def test_ytdlp_fallback_uses_direct_url_without_hls(monkeypatch):
+    from src.ring_buffer import _resolve_with_ytdlp
+
+    def fake_extract(url, opts, download):
+        return {"formats": [
+            {"ext": "mp4", "protocol": "https",
+             "url": "https://example.invalid/video.mp4"},
+        ], "url": "https://example.invalid/video.mp4"}
+
+    monkeypatch.setattr("src.ingestion._extract", fake_extract)
+    assert _resolve_with_ytdlp("https://www.youtube.com/live/x") == \
+        "https://example.invalid/video.mp4"
+
+
+def test_resolve_passes_m3u8_through(monkeypatch):
+    from src.ring_buffer import resolve_stream_url
+
+    # No resolver is even consulted for a direct .m3u8 URL.
+    _broken_streamlink(monkeypatch)
+    assert resolve_stream_url("https://example.invalid/stream.m3u8") == \
+        "https://example.invalid/stream.m3u8"

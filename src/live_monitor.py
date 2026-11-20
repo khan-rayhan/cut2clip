@@ -41,6 +41,7 @@ class LiveMonitor:
                  on_event=None,
                  process: bool = True,
                  model: str = "tiny",
+                 caption_style: str = "hormozi",
                  process_fn=None):
         self.url = url
         self.out_dir = out_dir
@@ -49,6 +50,7 @@ class LiveMonitor:
         self.buffer: RingBuffer | None = None
         self.process = process          # False: save the raw 16:9 cut only
         self.model = model              # Whisper model for captions
+        self.caption_style = caption_style
         self._process_fn = process_fn   # tests inject a fake; default process_clip
         self._raw_dir = os.path.join(out_dir, "_raw")
         self._dry_run = False
@@ -142,7 +144,8 @@ class LiveMonitor:
         fn = self._process_fn
         if fn is None:
             from .pipeline import process_clip as fn
-        fn(raw, out_path, model=self.model, log=print)
+        fn(raw, out_path, model=self.model, caption_style=self.caption_style,
+           log=print)
 
     def _keep_raw(self, raw: str, out_path: str, why: str) -> None:
         kept = out_path[:-4] + "-raw.mp4" if out_path.endswith(".mp4") else out_path + "-raw"

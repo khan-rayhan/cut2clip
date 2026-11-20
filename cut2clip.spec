@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 block_cipher = None
 HERE = Path(SPECPATH)
@@ -64,11 +64,29 @@ hiddenimports = [
 # collecting them again duplicates their native libraries in the
 # archive and corrupts the one-file bundle (the first build failed
 # to extract cv2/cv2.abi3.so with a decompression error).
-for package in ("mediapipe", "faster_whisper"):
+# streamlink has NO hook (checked: pyinstaller-hooks-contrib
+# 2026.10 ships none), so collect_all is safe for it — and it is
+# REQUIRED: streamlink 8.x loads its 138 built-in plugins lazily
+# from plugins/_plugins.json + the streamlink/plugins/*.py modules,
+# which a bare "streamlink" hiddenimport does not ship. Without
+# them every live URL fails with an empty NoPluginError ("Could not
+# resolve stream"), which is what happened on Rayhan's PC.
+# ctranslate2 has no hook either: faster-whisper imports it
+# statically, but on Windows its __init__ also glob-loads *.dll
+# files out of its own package directory with ctypes, which static
+# analysis cannot see. collect_all ships the whole package.
+for package in ("mediapipe", "faster_whisper", "streamlink", "ctranslate2"):
     tmp_ret = collect_all(package)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
     hiddenimports += tmp_ret[2]
+
+# streamlink's lazy plugin loader checksums _plugins.json against
+# the hash in the installed RECORD file (importlib.metadata). The
+# dist-info is not inside the package, so copy it explicitly; if
+# the check cannot run, streamlink falls back to importing all 138
+# plugins eagerly, which still works but is slower to start.
+datas += copy_metadata("streamlink")
 
 a = Analysis(
     [str(HERE / "src" / "gui_main.py")],

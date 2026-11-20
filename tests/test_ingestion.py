@@ -92,3 +92,61 @@ def test_audio_stream_source_returns_url_without_downloading(monkeypatch):
         "https://cdn.example/a.m4a", {"User-Agent": "x"})
     assert seen["download"] is False
     assert not hasattr(ingestion, "download_audio")  # the save-to-disk path is gone
+
+
+# ------------------------------------------------------- comment fetching
+
+
+def test_fetch_comments_returns_texts_and_caps(monkeypatch):
+    seen = {}
+
+    def fake(url, opts, download):
+        seen["opts"] = opts
+        seen["download"] = download
+        return {"comments": [
+            {"text": "1:23 nice", "author": "a"},
+            {"text": "no timestamp", "author": "b"},
+        ] * 80}  # 160 comments offered, cap is 100
+
+    monkeypatch.setattr(ingestion, "_extract", fake)
+    comments = ingestion.fetch_comments("u", max_comments=100)
+    assert len(comments) == 100
+    assert comments[0]["text"] == "1:23 nice"
+    assert seen["download"] is False
+    assert seen["opts"]["getcomments"] is True
+    # The cap reaches yt-dlp as a youtube extractor argument.
+    assert seen["opts"]["extractor_args"] == {
+        "youtube": {"max_comments": ["100"]}}
+
+
+def test_fetch_comments_raises_when_unavailable(monkeypatch):
+    def boom(url, opts, download):
+        raise RuntimeError("comments are disabled")
+
+    monkeypatch.setattr(ingestion, "_extract", boom)
+    with pytest.raises(ingestion.IngestionError, match="comments"):
+        ingestion.fetch_comments("u")
+
+
+def test_fetch_comment_points_falls_back_on_error(monkeypatch):
+    def boom(url, opts, download):
+        raise RuntimeError("comments are disabled")
+
+    monkeypatch.setattr(ingestion, "_extract", boom)
+    points, n = ingestion.fetch_comment_points("u", 180.0)
+    assert points is None and n == 0
+
+
+def test_fetch_comment_points_returns_density(monkeypatch):
+    def fake(url, opts, download):
+        return {"comments": [
+            {"text": "2:25 was the moment"},
+            {"text": "2:26!!"},
+            {"text": "hello"},
+        ]}
+
+    monkeypatch.setattr(ingestion, "_extract", fake)
+    points, n = ingestion.fetch_comment_points("u", 180.0)
+    assert n == 3
+    assert points[14].value == 1.0  # 2:25-2:26 land in the 140-150s bin
+    assert points[0].value == 0.0

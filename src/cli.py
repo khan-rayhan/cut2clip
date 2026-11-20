@@ -15,6 +15,7 @@ import argparse
 import sys
 
 from . import highlights, ingestion
+from .captions import CAPTION_STYLES
 from .live_monitor import LiveMonitor
 from .pipeline import process_clip
 
@@ -50,9 +51,16 @@ def cmd_clips(args: argparse.Namespace) -> int:
     if info.duration is None:
         print("Live stream: use live mode (Phase 2), not clips.")
         return 1
-    windows = highlights.heatmap_windows(info.heatmap, info.duration, top_n=args.n)
+    comment_points, n_comments = ingestion.fetch_comment_points(
+        args.url, info.duration)
+    windows = highlights.heatmap_windows(
+        info.heatmap, info.duration, top_n=args.n,
+        comment_points=comment_points)
     if windows:
-        print(f"Source: Most Replayed heatmap ({len(info.heatmap)} points)")
+        source = f"Most Replayed heatmap ({len(info.heatmap)} points)"
+        if comment_points and n_comments:
+            source += f" + comment spikes ({n_comments} comments)"
+        print(f"Source: {source}")
         _print_windows(windows)
         return 0
     print("No heatmap. Falling back to audio energy + transcript...")
@@ -69,12 +77,13 @@ def cmd_clips(args: argparse.Namespace) -> int:
 def cmd_live(args: argparse.Namespace) -> int:
     info = ingestion.probe(args.url)
     if not info.is_live:
-        print("This URL is not a live stream. Use 'clips' for VODs.")
+        print("This URL is not a live stream. Use 'clips' for pre-recorded videos.")
         return 1
     print(f"Monitoring live: {info.title}")
     print(f"Clips go to: {args.out}  (Ctrl+C to stop)")
     monitor = LiveMonitor(args.url, args.out, z_threshold=args.z,
-                          process=not args.no_process, model=args.model)
+                          process=not args.no_process, model=args.model,
+                          caption_style=args.caption_style)
     saved = monitor.run(duration_s=args.seconds, dry_run=args.dry_run)
     print(f"Done. Spikes: {monitor.spikes_seen}, clips saved: {len(saved)}")
     return 0
@@ -103,6 +112,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Log spikes without saving clips")
     p_live.add_argument("--model", default="tiny",
                         help="Whisper model size for captions")
+    p_live.add_argument("--caption-style", default="hormozi",
+                        choices=CAPTION_STYLES,
+                        help="Caption style for live clips")
     p_live.add_argument("--no-process", action="store_true",
                         help="Save raw 16:9 cuts only (no reframe, no captions)")
     p_live.set_defaults(fn=cmd_live)
@@ -113,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output MP4 path")
     p_proc.add_argument("--model", default="tiny",
                         help="Whisper model size (tiny, base, small, ...)")
+    p_proc.add_argument("--caption-style", default="hormozi",
+                        choices=CAPTION_STYLES,
+                        help="Caption style (hormozi, tiktok, karaoke, neon)")
     p_proc.add_argument("--no-captions", action="store_true",
                         help="Skip transcription and captions")
     p_proc.add_argument("--no-reframe", action="store_true",
@@ -129,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_process(args: argparse.Namespace) -> int:
     process_clip(args.input, args.out, model=args.model,
                  do_reframe=not args.no_reframe,
-                 do_captions=not args.no_captions)
+                 do_captions=not args.no_captions,
+                 caption_style=args.caption_style)
     return 0
 
 

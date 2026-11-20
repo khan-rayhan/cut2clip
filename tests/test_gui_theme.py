@@ -41,7 +41,7 @@ def test_main_window_builds_with_theme(tmp_path):
     assert window.process_button.objectName() == "primary"
     assert window.live_button.objectName() == "accent"
     assert window.info_label.objectName() == "info"
-    # A realistic VOD state renders without crashing.
+    # A realistic Pre-Recorded state renders without crashing.
     window._on_windows([
         ClipWindow(start=12.0, end=52.0, peak_time=30.0, score=0.91,
                    source="heatmap"),

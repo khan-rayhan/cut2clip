@@ -126,3 +126,76 @@ def test_burn_captions_with_colon_in_path(tmp_path):
                        str(folder / "c.ass"))
     out = burn_captions(str(video), ass, str(folder / "out.mp4"))
     assert (folder / "out.mp4").stat().st_size > 0 and out
+
+
+# ---------------------------------------------------------------- caption styles
+
+def _style_text(tmp_path, style):
+    words = [(0.0, 0.4, "Never"), (0.4, 0.8, "gonna"),
+             (0.8, 1.2, "give"), (1.2, 1.6, "you")]
+    ass = tmp_path / f"caps-{style}.ass"
+    words_to_ass(words, str(ass), style=style)
+    return ass.read_text()
+
+
+def test_words_to_ass_unknown_style_raises(tmp_path):
+    with pytest.raises(ValueError, match="Unknown caption style"):
+        words_to_ass([(0.0, 0.4, "hi")], str(tmp_path / "x.ass"),
+                     style="comic-sans")
+
+
+def test_tiktok_style_cycles_bright_colours(tmp_path):
+    text = _style_text(tmp_path, "tiktok")
+    events = [line for line in text.splitlines() if line.startswith("Dialogue:")]
+    assert len(events) == 4
+    # Pink, yellow, cyan, green all appear across the four events.
+    for colour in ("&H00A85CFF&", "&H000AD6FF&",
+                   "&H00FFE500&", "&H006BFF7C&"):
+        assert colour in text, f"missing TikTok colour {colour}"
+    # The current word pops bigger than the style's 68pt.
+    assert "{\\fs78\\c" in events[0]
+
+
+def test_karaoke_style_dims_unsung_words(tmp_path):
+    text = _style_text(tmp_path, "karaoke")
+    events = [line for line in text.splitlines() if line.startswith("Dialogue:")]
+    # Style line: dim grey primary, thick outline for the glow.
+    style = [line for line in text.splitlines()
+             if line.startswith("Style:")][0]
+    assert "&H00999999&" in style and ",6,2,2," in style
+    # Current word is bright white and pops; it resets to dim grey.
+    assert "{\\c&H00FFFFFF&\\fs76}Never{\\c&H00999999&\\fs64}" in events[0]
+    # The other words of the line are plain (no colour override), so
+    # they render in the style's dim grey.
+    assert "} gonna" in events[0] and "gonna" in events[0]
+
+
+def test_neon_style_has_cyan_glow_and_magenta_current(tmp_path):
+    text = _style_text(tmp_path, "neon")
+    style = [line for line in text.splitlines()
+             if line.startswith("Style:")][0]
+    # Cyan outline, thick border (8) and shadow for the glow.
+    assert "&H00FFFF00&" in style and ",8,2,2," in style
+    events = [line for line in text.splitlines() if line.startswith("Dialogue:")]
+    assert "{\\c&H00FF00FF&}Never{\\c&HFFFFFF&}" in events[0]
+
+
+def test_hormozi_style_unchanged(tmp_path):
+    text = _style_text(tmp_path, "hormozi")
+    events = [line for line in text.splitlines() if line.startswith("Dialogue:")]
+    assert "{\\c&H00FFFF&}Never{\\c&HFFFFFF&}" in events[0]
+    # No TikTok palette or neon magenta anywhere.
+    assert "&H00A85CFF&" not in text and "&H00FF00FF&" not in text
+
+
+def test_burn_tiktok_style_changes_pixels(tmp_path):
+    """A TikTok-styled ASS burns in just like the Hormozi one."""
+    src = tmp_path / "src.mp4"
+    _make_video(str(src))
+    words = [(4.0, 4.5, "HELLO"), (4.5, 5.0, "WORLD"), (5.0, 5.5, "TEST")]
+    ass = tmp_path / "caps.ass"
+    words_to_ass(words, str(ass), style="tiktok")
+    out = tmp_path / "captioned.mp4"
+    burn_captions(str(src), str(ass), str(out))
+    assert abs(_duration(str(out)) - 10.0) < 0.6
+    assert _caption_region_mean(str(out)) - _caption_region_mean(str(src)) > 1.0

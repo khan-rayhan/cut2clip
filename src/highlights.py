@@ -1,4 +1,4 @@
-"""Highlight detection for Mode A (VOD).
+"""Highlight detection for Mode A (Pre-Recorded).
 
 Three ranked sources, tried in order:
 1. Most Replayed heatmap from yt-dlp metadata (best signal).
@@ -24,6 +24,12 @@ from .ingestion import HeatPoint
 
 CLIP_LEN = 40.0
 SAMPLE_RATE = 16000
+
+# Weight of the comment signal when it is combined with the heatmap.
+COMMENT_WEIGHT = 0.4
+
+# Comments are binned into windows of this many seconds.
+COMMENT_BIN_S = 10.0
 
 HOOK_WORDS = {
     "watch", "wait", "look", "insane", "crazy", "secret", "best",
@@ -99,8 +105,16 @@ def select_windows(peaks: list[tuple[float, float]], duration: float,
 
 def heatmap_windows(heatmap: list[HeatPoint], duration: float,
                     top_n: int = 5,
-                    clip_len: float = CLIP_LEN) -> list[ClipWindow]:
-    """Windows from Most Replayed heatmap values."""
+                    clip_len: float = CLIP_LEN,
+                    comment_points: list[HeatPoint] | None = None,
+                    comment_weight: float = COMMENT_WEIGHT) -> list[ClipWindow]:
+    """Windows from Most Replayed heatmap values, optionally boosted
+    by comment spikes: moments lots of viewers commented on with a
+    timestamp (see ``comment_density_points``). The boost is
+    ``(1 - weight) * heat + weight * comments`` per heatmap point, so
+    a slightly weaker replay peak full of timestamped comments can
+    outrank a stronger one nobody commented on. Without comment
+    points the ranking is exactly the old heatmap-only one."""
     if not heatmap or duration is None:
         return []
     times = [(p.start_time + p.end_time) / 2.0 for p in heatmap]
@@ -109,8 +123,57 @@ def heatmap_windows(heatmap: list[HeatPoint], duration: float,
     if peak <= 0:
         return []
     norm = [v / peak for v in values]
+    source = "heatmap"
+    if comment_points:
+        c_times = [(p.start_time + p.end_time) / 2.0 for p in comment_points]
+        c_values = [p.value for p in comment_points]
+        if c_times and max(c_values) > 0:
+            comment_by_time = dict(zip(c_times, c_values))
+            combined = []
+            for t, h in zip(times, norm):
+                nearest = min(c_times, key=lambda x: abs(x - t))
+                combined.append((1.0 - comment_weight) * h
+                                + comment_weight * comment_by_time[nearest])
+            norm = combined
+            source = "heatmap+comments"
     peaks = _rank_peaks(times, norm, top_n=top_n, min_gap=clip_len)
-    return select_windows(peaks, duration, clip_len, source="heatmap")
+    return select_windows(peaks, duration, clip_len, source=source)
+
+
+# In YouTube comments a timestamp is mm:ss or h:mm:ss ("1:23", "1:02:03").
+_TIMESTAMP_RE = re.compile(r"\b(?:(\d+):)?(\d{1,2}):(\d{2})\b")
+
+
+def parse_comment_timestamps(text: str) -> list[float]:
+    """Video timestamps mentioned in a comment, in seconds.
+
+    "loved 1:23 and the 1:02:03 part!" -> [83.0, 3723.0]. Text
+    without timestamps gives []."""
+    seconds = []
+    for match in _TIMESTAMP_RE.finditer(text or ""):
+        hours, minutes, secs = match.groups()
+        total = int(secs) + 60 * int(minutes)
+        if hours is not None:
+            total += 3600 * int(hours)
+        seconds.append(float(total))
+    return seconds
+
+
+def comment_density_points(comment_texts: list[str], duration: float,
+                           bin_s: float = COMMENT_BIN_S) -> list[HeatPoint]:
+    """Comment density as HeatPoints: each 10-second bin counts the
+    timestamp mentions inside it, normalised so the busiest bin is
+    1.0. Timestamps past the end of the video are ignored."""
+    n = max(1, int(math.ceil(duration / bin_s)))
+    counts = [0] * n
+    for text in comment_texts:
+        for seconds in parse_comment_timestamps(text):
+            if 0 <= seconds < duration:
+                counts[min(int(seconds // bin_s), n - 1)] += 1
+    peak = max(counts)
+    return [HeatPoint(i * bin_s, (i + 1) * bin_s,
+                      c / peak if peak > 0 else 0.0)
+            for i, c in enumerate(counts)]
 
 
 def audio_energy_series(audio_path: str, window_s: float = 1.0,

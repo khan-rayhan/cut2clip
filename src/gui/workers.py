@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import traceback
 
 from PySide6.QtCore import QThread, Signal
 
@@ -43,10 +44,13 @@ class ClipsWorker(QThread):
         try:
             info = ingestion.probe(self.url)
             if info.duration is None:
-                self.failed.emit("This URL is a live stream, not a VOD.")
+                self.failed.emit("This URL is a live stream, not a pre-recorded video.")
                 return
+            comment_points, _n = ingestion.fetch_comment_points(
+                self.url, info.duration)
             windows = highlights.heatmap_windows(
-                info.heatmap, info.duration, top_n=self.top_n)
+                info.heatmap, info.duration, top_n=self.top_n,
+                comment_points=comment_points)
             if windows:
                 self.finished_windows.emit(windows)
                 return
@@ -71,7 +75,8 @@ class VodClipWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, url: str, start: float, end: float,
-                 out_path: str, model: str = "tiny"):
+                 out_path: str, model: str = "tiny",
+                 caption_style: str = "hormozi"):
         super().__init__()
         self.url = url
         # Named window_start/window_end on purpose: ``start`` would
@@ -80,6 +85,7 @@ class VodClipWorker(QThread):
         self.window_end = end
         self.out_path = out_path
         self.model = model
+        self.caption_style = caption_style
 
     def run(self) -> None:
         try:
@@ -92,6 +98,7 @@ class VodClipWorker(QThread):
                                            self.window_end, tmp)
                 self.progress.emit("Downloaded. Reframing and captioning ...")
                 process_clip(tmp, self.out_path, model=self.model,
+                             caption_style=self.caption_style,
                              log=self.progress.emit)
             finally:
                 if os.path.exists(tmp):
@@ -109,12 +116,13 @@ class LiveWorker(QThread):
     stopped = Signal()
 
     def __init__(self, url: str, out_dir: str, z_threshold: float = 2.5,
-                 model: str = "tiny"):
+                 model: str = "tiny", caption_style: str = "hormozi"):
         super().__init__()
         self.url = url
         self.out_dir = out_dir
         self.z_threshold = z_threshold
         self.model = model
+        self.caption_style = caption_style
         self._monitor: LiveMonitor | None = None
 
     def _on_event(self, event: dict) -> None:
@@ -124,10 +132,16 @@ class LiveWorker(QThread):
         try:
             self._monitor = LiveMonitor(
                 self.url, self.out_dir, z_threshold=self.z_threshold,
-                on_event=self._on_event, model=self.model)
+                on_event=self._on_event, model=self.model,
+                caption_style=self.caption_style)
             self._monitor.run()
-        except Exception as exc:
-            self.failed.emit(str(exc))
+        except Exception:
+            # The full traceback, not just str(exc): streamlink's
+            # NoPluginError has an EMPTY message, so the GUI used to
+            # show "Monitor failed: " with no cause at all. The live
+            # log pane scrolls, so the whole traceback is shown and
+            # a future failure is diagnosable from the log alone.
+            self.failed.emit(traceback.format_exc())
         finally:
             self.stopped.emit()
 

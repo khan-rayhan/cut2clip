@@ -95,20 +95,22 @@ def test_live_clip_goes_through_processing(tmp_path):
     out_path = str(out_dir / "live-x.mp4")
     calls = []
 
-    def fake_process(raw, out, model, log):
-        calls.append((raw, out, model))
+    def fake_process(raw, out, model, log, caption_style="hormozi"):
+        calls.append((raw, out, model, caption_style))
         assert os.path.exists(raw)
         with open(out, "wb") as fh:
             fh.write(b"processed")
 
     events = []
     monitor = LiveMonitor("u", str(out_dir), model="base",
+                          caption_style="tiktok",
                           process_fn=fake_process, on_event=events.append)
     _run_workers_once(monitor, out_path)
 
     assert monitor.clips_saved == [out_path]
     assert open(out_path, "rb").read() == b"processed"
     assert calls and calls[0][1] == out_path and calls[0][2] == "base"
+    assert calls[0][3] == "tiktok"  # caption style reaches process_clip
     assert not os.path.exists(calls[0][0])        # raw cut cleaned up
     assert not os.path.exists(monitor._raw_dir)   # and its folder
     assert any(e["type"] == "clip" and e["path"] == out_path for e in events)
@@ -118,7 +120,7 @@ def test_failed_processing_keeps_the_raw_cut(tmp_path):
     out_dir = tmp_path / "clips"
     out_path = str(out_dir / "live-y.mp4")
 
-    def boom(raw, out, model, log):
+    def boom(raw, out, model, log, caption_style="hormozi"):
         raise RuntimeError("whisper exploded")
 
     monitor = LiveMonitor("u", str(out_dir), process_fn=boom)

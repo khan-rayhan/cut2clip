@@ -1,4 +1,4 @@
-"""Main window: paste a URL, detect VOD or live, get clips."""
+"""Main window: paste a URL, detect pre-recorded or live, get clips."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget)
 
 from .. import highlights
+from ..captions import CAPTION_STYLES
 from .workers import ClipsWorker, LiveWorker, ProbeWorker, VodClipWorker
 
 ORG = "ShortsApp"
@@ -83,11 +84,19 @@ class MainWindow(QMainWindow):
         self.process_button.setEnabled(False)
         self.process_button.clicked.connect(self._on_process_selected)
         vod_buttons.addWidget(self.process_button)
+        self.auto_button = QPushButton("Auto-clip top 3")
+        self.auto_button.setObjectName("primary")
+        self.auto_button.setEnabled(False)
+        self.auto_button.setToolTip(
+            "Process the top 3 highlight windows automatically, "
+            "no ticking needed.")
+        self.auto_button.clicked.connect(self._on_auto_top3)
+        vod_buttons.addWidget(self.auto_button)
         self.vod_progress = QProgressBar()
         self.vod_progress.setVisible(False)
         vod_buttons.addWidget(self.vod_progress)
         vod_layout.addLayout(vod_buttons)
-        self.tabs.addTab(vod_tab, "VOD clips")
+        self.tabs.addTab(vod_tab, "Pre-Recorded clips")
 
         live_tab = QWidget()
         live_layout = QVBoxLayout(live_tab)
@@ -130,6 +139,12 @@ class MainWindow(QMainWindow):
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small"])
         settings_row.addWidget(self.model_combo)
+        settings_row.addWidget(QLabel("Captions:"))
+        self.caption_combo = QComboBox()
+        self.caption_combo.addItems(list(CAPTION_STYLES))
+        self.caption_combo.setToolTip(
+            "Caption style for every clip: hormozi, tiktok, karaoke, neon.")
+        settings_row.addWidget(self.caption_combo)
         settings_row.addWidget(QLabel("Device:"))
         self.device_combo = QComboBox()
         self.device_combo.addItems(["auto", "cpu", "cuda"])
@@ -145,12 +160,16 @@ class MainWindow(QMainWindow):
         self.out_edit.setText(self.settings.value(
             "output_folder", os.path.join(os.path.expanduser("~"), "ShortsClips")))
         self.model_combo.setCurrentText(self.settings.value("model", "tiny"))
+        self.caption_combo.setCurrentText(
+            self.settings.value("caption_style", "hormozi"))
         self.device_combo.setCurrentText(self.settings.value("device", "auto"))
         self.z_spin.setValue(float(self.settings.value("z_threshold", 2.5)))
 
     def _save_settings(self) -> None:
         self.settings.setValue("output_folder", self.out_edit.text())
         self.settings.setValue("model", self.model_combo.currentText())
+        self.settings.setValue("caption_style",
+                               self.caption_combo.currentText())
         self.settings.setValue("device", self.device_combo.currentText())
         self.settings.setValue("z_threshold", self.z_spin.value())
 
@@ -178,7 +197,7 @@ class MainWindow(QMainWindow):
 
     def _on_detected(self, info) -> None:
         self.detect_button.setEnabled(True)
-        kind = "LIVE" if info.is_live else "VOD"
+        kind = "LIVE" if info.is_live else "Pre-Recorded"
         heat = f", heatmap {len(info.heatmap)} points" if info.has_heatmap else ", no heatmap"
         dur = _fmt(info.duration) if info.duration else "live"
         self.info_label.setText(f"{info.title or '(no title)'} — {kind}, {dur}{heat}")
@@ -214,9 +233,10 @@ class MainWindow(QMainWindow):
             item.setCheckState(Qt.CheckState.Checked)
             self.windows_list.addItem(item)
         self.process_button.setEnabled(bool(windows))
+        self.auto_button.setEnabled(bool(windows))
         self.statusBar().showMessage(f"{len(windows)} highlight windows found.")
 
-    # ------------------------------------------------------------ VOD process
+    # ------------------------------------------------------------ Pre-Recorded process
 
     def _on_process_selected(self) -> None:
         selected = [self._windows[i] for i in range(self.windows_list.count())
@@ -224,18 +244,33 @@ class MainWindow(QMainWindow):
         if not selected:
             QMessageBox.warning(self, "Nothing selected", "Tick at least one window.")
             return
+        self._start_processing(selected)
+
+    def _on_auto_top3(self) -> None:
+        """One-click Pre-Recorded auto-clip: process the top 3 highlight
+        windows, no ticking needed. Fewer than 3 windows just means
+        fewer clips."""
+        if not self._windows:
+            QMessageBox.warning(self, "No windows",
+                                "Detect a pre-recorded video first to find highlight windows.")
+            return
+        self._start_processing(list(self._windows[:3]))
+
+    def _start_processing(self, windows: list) -> None:
         out_dir = self.out_edit.text().strip()
         os.makedirs(out_dir, exist_ok=True)
         self.process_button.setEnabled(False)
+        self.auto_button.setEnabled(False)
         self.vod_progress.setVisible(True)
-        self.vod_progress.setMaximum(len(selected))
+        self.vod_progress.setMaximum(len(windows))
         self.vod_progress.setValue(0)
-        self._pending = list(selected)
+        self._pending = list(windows)
         self._process_next()
 
     def _process_next(self) -> None:
         if not self._pending:
             self.process_button.setEnabled(True)
+            self.auto_button.setEnabled(True)
             self.vod_progress.setVisible(False)
             self.statusBar().showMessage("All selected clips processed.")
             return
@@ -244,7 +279,8 @@ class MainWindow(QMainWindow):
         out_path = os.path.join(self.out_edit.text().strip(),
                                 f"clip-{stamp}.mp4")
         worker = VodClipWorker(self._current_url, window.start, window.end,
-                               out_path, model=self.model_combo.currentText())
+                               out_path, model=self.model_combo.currentText(),
+                               caption_style=self.caption_combo.currentText())
         worker.progress.connect(self.statusBar().showMessage)
         worker.finished_file.connect(self._on_clip_done)
         worker.failed.connect(self._on_clip_failed)
@@ -275,7 +311,8 @@ class MainWindow(QMainWindow):
         os.makedirs(out_dir, exist_ok=True)
         self._live_worker = LiveWorker(self._current_url, out_dir,
                                        z_threshold=self.z_spin.value(),
-                                       model=self.model_combo.currentText())
+                                       model=self.model_combo.currentText(),
+                                       caption_style=self.caption_combo.currentText())
         self._live_worker.event.connect(self._on_live_event)
         self._live_worker.failed.connect(self._on_live_failed)
         self._live_worker.stopped.connect(self._on_live_stopped)

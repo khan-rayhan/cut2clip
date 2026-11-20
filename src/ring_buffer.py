@@ -25,29 +25,68 @@ class RingBufferError(Exception):
     """Raised when the buffer cannot start or a clip cannot be cut."""
 
 
+def _resolve_with_ytdlp(url: str) -> str:
+    """Fallback when streamlink cannot resolve *url*: ask yt-dlp for
+    the direct stream URL. Prefers an HLS (.m3u8) format — the last
+    one listed, which is the highest quality — so the ring buffer
+    can segment it; otherwise takes the selected format's URL.
+    Certificate failures retry with verification off, the same as
+    ``ingestion._extract`` (whose retry this reuses)."""
+    from .ingestion import _extract
+
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+            "noplaylist": True}
+    info = _extract(url, opts, download=False)
+    if not isinstance(info, dict):
+        raise RingBufferError(f"yt-dlp returned no info for {url!r}")
+    hls_url = None
+    for fmt in info.get("formats") or []:
+        fmt_url = fmt.get("url") or ""
+        if fmt.get("ext") == "m3u8" or "m3u8" in fmt.get("protocol", ""):
+            hls_url = fmt_url  # keep the last (best) one
+    if hls_url:
+        return hls_url
+    direct = info.get("url")
+    if direct:
+        return direct
+    raise RingBufferError(f"yt-dlp found no playable format for {url!r}")
+
+
 def resolve_stream_url(url: str) -> str:
     """Return a playable HLS URL for *url*.
 
     A direct .m3u8 URL is returned as-is. Anything else goes through
-    streamlink, which resolves YouTube and Twitch (and others) to
-    their underlying stream URL.
+    streamlink first; if streamlink fails or finds no stream, yt-dlp
+    is tried as a fallback — it resolved YouTube live URLs (e.g. an
+    IShowSpeed GTA 6 finale) that streamlink could not. When both
+    fail the error names both causes, so the GUI shows why it failed
+    instead of an empty message.
     """
     if url.endswith(".m3u8"):
         return url
+    streamlink_error: str | None = None
     try:
         from streamlink import Streamlink
     except ImportError as exc:
-        raise RingBufferError(f"streamlink is not installed: {exc}") from exc
+        streamlink_error = f"streamlink is not installed: {exc}"
+    else:
+        try:
+            session = Streamlink()
+            streams = session.streams(url)
+        except Exception as exc:
+            streamlink_error = f"streamlink failed: {exc}"
+        else:
+            for quality in ("best", "1080p", "720p", "480p", "worst"):
+                stream = streams.get(quality)
+                if stream is not None:
+                    return stream.url
+            streamlink_error = "streamlink found no playable stream"
     try:
-        session = Streamlink()
-        streams = session.streams(url)
+        return _resolve_with_ytdlp(url)
     except Exception as exc:
-        raise RingBufferError(f"Could not resolve stream {url!r}: {exc}") from exc
-    for quality in ("best", "1080p", "720p", "480p", "worst"):
-        stream = streams.get(quality)
-        if stream is not None:
-            return stream.url
-    raise RingBufferError(f"No playable stream found for {url!r}")
+        raise RingBufferError(
+            f"Could not resolve stream {url!r}: {streamlink_error}; "
+            f"yt-dlp fallback also failed: {exc}") from exc
 
 
 _SEGMENT_RE = re.compile(r"seg-(\d{8}T\d{6})\.ts")

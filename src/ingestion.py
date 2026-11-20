@@ -1,7 +1,7 @@
 """Ingestion: probe a URL with yt-dlp and return structured metadata.
 
 Uses the yt_dlp Python API (no subprocess, no binary path juggling).
-Verified 2026-11-18 against a real YouTube VOD: the info dict carries
+Verified 2026-11-18 against a real YouTube pre-recorded video: the info dict carries
 ``heatmap`` as a list of ``{"start_time", "end_time", "value"}`` with
 value normalised 0..1, plus ``is_live`` and ``duration``.
 """
@@ -119,6 +119,54 @@ def probe(url: str) -> VideoInfo:
         heatmap=_parse_heatmap(info.get("heatmap")),
         auto_caption_urls=_caption_urls(info),
     )
+
+
+def fetch_comments(url: str, max_comments: int = 100) -> list[dict]:
+    """Fetch up to *max_comments* comments with yt-dlp (no API key).
+
+    Returns the raw comment dicts (each has at least ``text``).
+    Raises IngestionError when comments are disabled or unavailable;
+    callers fall back to the other highlight signals. The cap is
+    enforced two ways: yt-dlp's ``max_comments`` extractor argument
+    (``youtube:max_comments``) stops the pagination, and the result
+    is truncated again here in case the extractor ignores it.
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "getcomments": True,
+        "extractor_args": {"youtube": {"max_comments": [str(max_comments)]}},
+    }
+    try:
+        info = _extract(url, opts, download=False)
+    except Exception as exc:
+        raise IngestionError(f"Could not fetch comments for {url!r}: {exc}") from exc
+    if not isinstance(info, dict):
+        raise IngestionError(f"Could not fetch comments for {url!r}: empty result")
+    comments = info.get("comments") or []
+    return [c for c in comments if isinstance(c, dict)][:max_comments]
+
+
+def fetch_comment_points(url: str, duration: float):
+    """Best-effort comment-density signal for a URL.
+
+    Returns (points, comment count); (None, 0) when comments are
+    disabled or unavailable, so the caller falls back to the
+    heatmap alone. (The highlights import is lazy: highlights
+    imports this module, so a top-level import would be circular.)"""
+    from .highlights import comment_density_points
+
+    try:
+        comments = fetch_comments(url)
+    except Exception:
+        return None, 0
+    texts = [c.get("text") or "" for c in comments]
+    points = comment_density_points(texts, duration)
+    if not any(p.value > 0 for p in points):
+        return None, len(comments)  # comments exist but name no moment
+    return points, len(comments)
 
 
 def audio_stream_source(url: str) -> tuple[str, dict]:
