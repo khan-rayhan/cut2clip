@@ -1,0 +1,15 @@
+# Python / build outputs — never commit these.
+.venv/
+venv/
+dist/
+build/
+installer/
+__pycache__/
+*.pyc
+*.spec.bak
+# Local run outputs and caches
+*.log
+clips/
+live-clips/
+tmp-bundle/
+tmp-pip/
