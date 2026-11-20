@@ -1,0 +1,11 @@
+yt-dlp>=2026.1.1
+numpy>=1.26
+streamlink>=8.0
+chat-downloader>=0.2.0
+faster-whisper>=1.0
+av>=11,<14  # faster-whisper 1.2.1 calls av.open(metadata_errors=...), removed in av 14+
+mediapipe>=1.2
+opencv-python-headless>=4.8
+onnxruntime>=1.17
+PySide6>=6.6
+pyinstaller>=6.0  # only needed to build the desktop app, not to run it
