@@ -172,11 +172,17 @@ def download_section(url: str, start: float, end: float,
     """Download the ``[start, end]`` seconds of a video, video and
     audio merged into one MP4. Used by the GUI to fetch one highlight
     window before processing it."""
-    # MP4-only, 720p-capped formats on purpose: the generic
+    # 1080p, H.264 preferred, with a fallback chain: the generic
     # "bv*+ba/b" picks VP9 webm video, whose download stalls on
     # some proxies, and an uncapped "bv*[ext=mp4]" picks the 229 MB
-    # 4K AV1 file. 720p H.264 MP4 merges cleanly and is plenty for
-    # a 1080x1920 vertical crop.
+    # 4K AV1 file. Preferring avc1 (H.264) keeps the merge clean,
+    # and a 40-second 1080p section is only about 30-60 MB, so
+    # the download size is not a concern.
+    #
+    # Audio MUST be ba[ext=m4a]: plain "ba" picks Opus/Vorbis,
+    # which cannot go into an MP4, so yt-dlp switches the output
+    # to MKV ("section.mp4.mkv") and the expected file never
+    # appears. The last fallback is mp4-only for the same reason.
     #
     # NOTE: the section is passed as a "download_ranges" CALLBACK,
     # not as the CLI's "--download-sections" strings. The Python
@@ -186,7 +192,7 @@ def download_section(url: str, start: float, end: float,
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "format": "bv*[ext=mp4][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]",
+        "format": "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]",
         "outtmpl": out_path,
         "noplaylist": True,
         "download_ranges": lambda info_dict, ydl: [

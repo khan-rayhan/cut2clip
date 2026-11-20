@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.2 — 2026-11-20
+
+### Changed
+- VOD section downloads now allow up to 1080p instead of 720p, preferring H.264 (`avc1`) with a fallback chain: `bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]`. A 40-second 1080p section is about 30–60 MB, so the download size is not a concern; the H.264 preference still avoids the VP9/webm downloads that stall on some proxies. Audio stays `m4a` on purpose — plain best-audio picks Opus/Vorbis, which cannot go into an MP4, so yt-dlp would switch the output to MKV instead.
+
 ## v1.0.1 — 2026-11-20
 
 ### Added
