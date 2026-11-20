@@ -6,7 +6,7 @@
 #      Actions tab) and the workflow builds cut2clip.exe with
 #      PyInstaller, smoke-tests it, then wraps it in a proper
 #      installer with Inno Setup.
-#   2. The installer (Cut2Clip-Setup-1.0.3.exe) is uploaded as
+#   2. The installer (Cut2Clip-Setup-1.0.1.exe) is uploaded as
 #      a workflow artifact, and on a tag push it is attached to
 #      a GitHub Release — that is the file the user downloads,
 #      installs, and runs. No Python, FFmpeg, venv or build
