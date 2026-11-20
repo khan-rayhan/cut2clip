@@ -2,6 +2,13 @@
 
 ## v1.0.1 — 2026-11-20
 
+### Added
+- Modern dark UI: gradient hero header, violet-to-pink gradient
+  buttons, styled tabs, lists and log. The live Start button turns
+  red while monitoring is running.
+- GUI theme tests that build the main window offscreen and verify
+  the theme and a realistic VOD state render.
+
 ### Fixed
 - Windows: captions failed to burn because the `.ass` path (`C:\...`) was passed to the ffmpeg filter unquoted. The path is now quoted and escaped.
 - Split-screen layout stretched the picture (a round object came out 1.74x too tall on top and 0.80x too squat below). Panels now keep the source aspect ratio; the top panel sits on a blurred copy instead of being stretched.
