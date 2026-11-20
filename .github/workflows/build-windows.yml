@@ -3,10 +3,10 @@
 #
 # How it works:
 #   1. Push a tag like v1.0.0 (or run it by hand from the
-#      Actions tab) and the workflow builds shorts-app.exe with
+#      Actions tab) and the workflow builds cut2clip.exe with
 #      PyInstaller, smoke-tests it, then wraps it in a proper
 #      installer with Inno Setup.
-#   2. The installer (ShortsApp-Setup-1.0.0.exe) is uploaded as
+#   2. The installer (Cut2Clip-Setup-1.0.3.exe) is uploaded as
 #      a workflow artifact, and on a tag push it is attached to
 #      a GitHub Release — that is the file the user downloads,
 #      installs, and runs. No Python, FFmpeg, venv or build
@@ -48,12 +48,12 @@ jobs:
           pip install pyinstaller
 
       - name: Build the exe
-        run: pyinstaller shorts-app.spec
+        run: pyinstaller cut2clip.spec
 
       - name: Smoke-test the exe
         env:
           QT_QPA_PLATFORM: offscreen
-        run: .\dist\shorts-app.exe --smoke-test
+        run: .\dist\cut2clip.exe --smoke-test
 
       - name: Build the installer
         run: iscc packaging\installer.iss
@@ -61,11 +61,11 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShortsApp-Setup
-          path: installer\ShortsApp-Setup-*.exe
+          name: Cut2Clip-Setup
+          path: installer\Cut2Clip-Setup-*.exe
 
       - name: Attach installer to a Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer\ShortsApp-Setup-*.exe
+          files: installer\Cut2Clip-Setup-*.exe
