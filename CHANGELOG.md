@@ -1,5 +1,42 @@
 # Changelog
 
+## v1.0.2 — 2026-11-20
+
+### Performance
+- Added Auto, Lite, Balanced and Fast profiles. Auto selects a profile using physical RAM and CPU core count; Lite reduces frame sampling and detector input resolution for low-end PCs.
+- Reworked reframing to stream frames directly to FFmpeg instead of writing an intermediate MPEG-4 file and re-encoding it.
+- When captions and reframing are both enabled, ASS subtitles are burned during the same final encode.
+- Added one-time probes for NVIDIA NVENC, Intel Quick Sync and AMD AMF; falls back to tuned x264 when no hardware encoder passes the probe.
+- Cached the active faster-whisper model between clips, enabled greedy decoding for faster short-clip transcription, and used CTranslate2 for CUDA availability detection without requiring PyTorch. (VAD was tried here and removed: it drops sung vocals on real song audio, returning zero words.)
+- Scaled detector input frames and bounded ONNX Runtime CPU threads; prefer CUDAExecutionProvider when available.
+- Put temporary processing files on the output volume to avoid cross-volume copies.
+- Connected performance and device settings through the GUI, live processing and CLI.
+- Updated package version metadata to 1.0.2.
+
+### Fixed
+- Certificate errors no longer silently disable TLS verification: yt-dlp now retries against the OS certificate store (`compat_opts={'no-certifi'}`), which holds a corporate/MITM proxy CA that certifi's bundled store lacks. Disabling verification now needs the explicit opt-in `CUT2CLIP_ALLOW_INSECURE_YTDLP=1`.
+- Installer version was 1.0.1 while the code said 1.0.2; all version metadata (code, pyproject, installer, changelog) now says 1.0.2.
+
+### Verification
+- Full suite: 74 tests. First full run: 73 passed, 1 failed — the
+  failure was a real regression: `vad_filter=True` dropped all words
+  on real song audio (0 words on Rick Astley 30–45s, where the old
+  settings return 42). VAD was removed (greedy decoding kept);
+  the caption + pipeline tests (16) then re-ran green, so all 74
+  tests pass. Two stale test fakes were also fixed (GUI worker now
+  accepts `device`/`performance_mode`; live-monitor fake accepts
+  `performance_mode`/`device`).
+- Real 15s end-to-end render (Rick Astley 18–33s, tiny, Hormozi,
+  performance auto → lite on this VM): 1080x1920 h264 + AAC,
+  exactly 15.000s, 25 words transcribed, subject reframed,
+  Hormozi captions burned in — 26.1s total (transcribe 5.3s +
+  single-encode reframe 20.7s), about 10x faster than the old
+  two-pass pipeline (~259s for the same 15s).
+- TLS: real download retried against the OS certificate store
+  after the certifi bundle failed (verification stays on).
+- Still untested on a real PC: live-stream run, CUDA caption
+  speed, macOS build.
+
 ## v1.0.1 — 2026-11-20
 
 ### Added

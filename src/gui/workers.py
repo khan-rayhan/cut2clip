@@ -76,7 +76,8 @@ class VodClipWorker(QThread):
 
     def __init__(self, url: str, start: float, end: float,
                  out_path: str, model: str = "tiny",
-                 caption_style: str = "hormozi"):
+                 caption_style: str = "hormozi", device: str = "auto",
+                 performance_mode: str = "auto"):
         super().__init__()
         self.url = url
         # Named window_start/window_end on purpose: ``start`` would
@@ -86,6 +87,8 @@ class VodClipWorker(QThread):
         self.out_path = out_path
         self.model = model
         self.caption_style = caption_style
+        self.device = device
+        self.performance_mode = performance_mode
 
     def run(self) -> None:
         try:
@@ -99,6 +102,7 @@ class VodClipWorker(QThread):
                 self.progress.emit("Downloaded. Reframing and captioning ...")
                 process_clip(tmp, self.out_path, model=self.model,
                              caption_style=self.caption_style,
+                             device=self.device, performance_mode=self.performance_mode,
                              log=self.progress.emit)
             finally:
                 if os.path.exists(tmp):
@@ -116,13 +120,16 @@ class LiveWorker(QThread):
     stopped = Signal()
 
     def __init__(self, url: str, out_dir: str, z_threshold: float = 2.5,
-                 model: str = "tiny", caption_style: str = "hormozi"):
+                 model: str = "tiny", caption_style: str = "hormozi",
+                 performance_mode: str = "auto", device: str = "auto"):
         super().__init__()
         self.url = url
         self.out_dir = out_dir
         self.z_threshold = z_threshold
         self.model = model
         self.caption_style = caption_style
+        self.performance_mode = performance_mode
+        self.device = device
         self._monitor: LiveMonitor | None = None
 
     def _on_event(self, event: dict) -> None:
@@ -133,7 +140,8 @@ class LiveWorker(QThread):
             self._monitor = LiveMonitor(
                 self.url, self.out_dir, z_threshold=self.z_threshold,
                 on_event=self._on_event, model=self.model,
-                caption_style=self.caption_style)
+                caption_style=self.caption_style,
+                performance_mode=self.performance_mode, device=self.device)
             self._monitor.run()
         except Exception:
             # The full traceback, not just str(exc): streamlink's

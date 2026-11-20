@@ -95,7 +95,8 @@ def test_live_clip_goes_through_processing(tmp_path):
     out_path = str(out_dir / "live-x.mp4")
     calls = []
 
-    def fake_process(raw, out, model, log, caption_style="hormozi"):
+    def fake_process(raw, out, model, log, caption_style="hormozi",
+                     performance_mode="auto", device="auto"):
         calls.append((raw, out, model, caption_style))
         assert os.path.exists(raw)
         with open(out, "wb") as fh:

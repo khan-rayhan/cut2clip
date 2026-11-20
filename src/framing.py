@@ -170,8 +170,18 @@ def detect_persons_yolo(frame: np.ndarray) -> list[tuple[int, int, int, int]]:
         return []
     if _yolo_session is None:
         try:
+            available = ort.get_available_providers()
+            providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
+                         if "CUDAExecutionProvider" in available
+                         else ["CPUExecutionProvider"])
+            session_options = ort.SessionOptions()
+            session_options.intra_op_num_threads = max(1, min(4, os.cpu_count() or 2))
+            session_options.inter_op_num_threads = 1
+            session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             _yolo_session = ort.InferenceSession(
-                _yolo_model_path(), providers=["CPUExecutionProvider"])
+                _yolo_model_path(), sess_options=session_options,
+                providers=providers)
         except Exception:
             _yolo_failed = True
             return []
@@ -224,10 +234,15 @@ def pick_subject(frame: np.ndarray) -> tuple[int, int, int, int] | None:
 class Framer:
     """Computes a crop trajectory for one video, then reframes it."""
 
-    def __init__(self, video_path: str, sample_fps: float = 2.0,
-                 alpha: float = 0.3):
+    def __init__(self, video_path: str, sample_fps: float | None = None,
+                 alpha: float = 0.3, detection_width: int | None = None,
+                 performance_mode: str = "balanced"):
+        from .performance import get_profile
+        profile = get_profile(performance_mode)
+        self.sample_fps = max(0.25, float(sample_fps if sample_fps is not None else profile.sample_fps))
+        self.detection_width = max(320, int(detection_width or profile.detection_width))
+        self.performance_mode = performance_mode
         self.video_path = video_path
-        self.sample_fps = sample_fps
         self.alpha = alpha
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -243,33 +258,47 @@ class Framer:
         self.centers: list[float] = []  # smoothed subject centre-x per sample
 
     def compute_trajectory(self) -> str:
-        """Sample frames, find the subject, smooth the centre-x.
-        Returns the layout ('single' or 'split')."""
+        """Sample only required timestamps and run detectors on scaled frames.
+
+        Seeking to the next sample avoids decoding every intervening frame on
+        long-GOP footage. Detection is performed on a bounded-width copy, while
+        crop coordinates are mapped back to the original frame.
+        """
         cap = cv2.VideoCapture(self.video_path)
-        step = max(1, int(round(self.fps / self.sample_fps)))
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video {self.video_path!r}")
         raw_centers: list[float] = []
         face_counts: list[int] = []
-        index = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if index % step == 0:
-                faces = detect_faces_mediapipe(frame)
-                box = None
-                if faces:
-                    box = max(faces, key=lambda b: b[2] * b[3])
+        frame_index = 0
+        step = max(1, int(round(self.fps / self.sample_fps)))
+        try:
+            while frame_index < self.frame_count:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                h, w = frame.shape[:2]
+                scale = min(1.0, self.detection_width / max(1, w))
+                if scale < 1.0:
+                    small = cv2.resize(frame, (max(1, int(w * scale)),
+                                               max(1, int(h * scale))),
+                                       interpolation=cv2.INTER_AREA)
                 else:
-                    persons = detect_persons_yolo(frame)
+                    small = frame
+                faces = detect_faces_mediapipe(small)
+                box = max(faces, key=lambda b: b[2] * b[3]) if faces else None
+                if box is None:
+                    persons = detect_persons_yolo(small)
                     if persons:
                         box = max(persons, key=lambda b: b[2] * b[3])
                 face_counts.append(len(faces))
                 if box is not None:
-                    raw_centers.append(box[0] + box[2] / 2)
+                    raw_centers.append((box[0] + box[2] / 2) / scale)
                 else:
                     raw_centers.append(self.w / 2)
-            index += 1
-        cap.release()
+                frame_index += step
+        finally:
+            cap.release()
         self.centers = ema_smooth(raw_centers, self.alpha)
         self.layout = decide_layout(face_counts, sample_fps=self.sample_fps)
         return self.layout
@@ -302,41 +331,64 @@ class Framer:
                              (OUT_W, bottom_h))
         return np.vstack([content, speaker])
 
-    def reframe_video(self, output_path: str) -> str:
-        """Write the reframed video (video only) and mux the original
-        audio back, producing an H.264/AAC MP4 at 1080x1920."""
+    def reframe_video(self, output_path: str, ass_path: str | None = None) -> str:
+        """Stream reframed frames directly to FFmpeg for a single encode.
+
+        This removes the previous intermediate MPEG-4 file and its extra
+        H.264 re-encode. Original audio is muxed in the same FFmpeg pass.
+        """
+        from .performance import ffmpeg_video_args, get_profile
         if not self.centers:
             self.compute_trajectory()
-        # Next to the output, not a fixed name in the temp folder, so two
-        # reframes running at once cannot overwrite each other.
-        fd, tmp_video = tempfile.mkstemp(
-            suffix=".mp4", prefix="shorts-reframe-",
-            dir=os.path.dirname(os.path.abspath(output_path)))
-        os.close(fd)
-        cap = cv2.VideoCapture(self.video_path)
-        writer = cv2.VideoWriter(
-            tmp_video, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (OUT_W, OUT_H))
-        index = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            out = self._reframe_frame(frame, index / self.fps)
-            writer.write(out)
-            index += 1
-        cap.release()
-        writer.release()
+        get_profile(self.performance_mode)  # validate the selected profile
         cmd = ["ffmpeg", "-y", "-v", "error",
-               "-i", tmp_video, "-i", self.video_path,
-               "-map", "0:v:0", "-map", "1:a:0?",
-               "-c:v", "libx264", "-pix_fmt", "yuv420p",
-               "-c:a", "aac", "-shortest", "-movflags", "+faststart",
-               output_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        try:
-            os.remove(tmp_video)
-        except OSError:
-            pass
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg reframe mux failed: {result.stderr[-300:]}")
+               "-f", "rawvideo", "-pix_fmt", "bgr24",
+               "-s", f"{OUT_W}x{OUT_H}", "-r", str(self.fps), "-i", "-",
+               "-i", self.video_path, "-map", "0:v:0", "-map", "1:a:0?",
+               *ffmpeg_video_args(self.performance_mode), "-c:a", "aac",
+               "-shortest", "-movflags", "+faststart"]
+        if ass_path:
+            # Add subtitles before encoding so reframing and caption burn-in
+            # do not require two separate lossy video encodes.
+            cmd[cmd.index("-map"):cmd.index("-map")] = ["-vf", f"ass={_escape_filter_path(ass_path)}"]
+        cmd.append(output_path)
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video {self.video_path!r}")
+        import tempfile as _tempfile
+        with _tempfile.TemporaryFile() as err_file:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=err_file)
+            frames_written = 0
+            try:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    out = self._reframe_frame(frame, frames_written / self.fps)
+                    proc.stdin.write(memoryview(out))
+                    frames_written += 1
+                proc.stdin.close()
+                return_code = proc.wait()
+            except Exception:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                raise
+            finally:
+                cap.release()
+            if return_code != 0:
+                err_file.seek(0)
+                error = err_file.read().decode("utf-8", errors="replace")[-1200:]
+                raise RuntimeError(f"ffmpeg encode failed: {error}")
+        if frames_written == 0:
+            raise RuntimeError("No video frames were processed")
         return output_path
+
+
+def _escape_filter_path(path: str) -> str:
+    """Escape a path for FFmpeg's ASS filter on Windows and POSIX."""
+    value = os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
+    value = value.replace("'", "'\\''")
+    return "'" + value + "'"
+

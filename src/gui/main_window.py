@@ -139,6 +139,12 @@ class MainWindow(QMainWindow):
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small"])
         settings_row.addWidget(self.model_combo)
+        settings_row.addWidget(QLabel("Performance:"))
+        self.performance_combo = QComboBox()
+        self.performance_combo.addItems(["auto", "lite", "balanced", "fast"])
+        self.performance_combo.setToolTip(
+            "Auto selects a profile based on available RAM and CPU cores.")
+        settings_row.addWidget(self.performance_combo)
         settings_row.addWidget(QLabel("Captions:"))
         self.caption_combo = QComboBox()
         self.caption_combo.addItems(list(CAPTION_STYLES))
@@ -163,6 +169,7 @@ class MainWindow(QMainWindow):
         self.caption_combo.setCurrentText(
             self.settings.value("caption_style", "hormozi"))
         self.device_combo.setCurrentText(self.settings.value("device", "auto"))
+        self.performance_combo.setCurrentText(self.settings.value("performance_mode", "auto"))
         self.z_spin.setValue(float(self.settings.value("z_threshold", 2.5)))
 
     def _save_settings(self) -> None:
@@ -171,6 +178,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("caption_style",
                                self.caption_combo.currentText())
         self.settings.setValue("device", self.device_combo.currentText())
+        self.settings.setValue("performance_mode", self.performance_combo.currentText())
         self.settings.setValue("z_threshold", self.z_spin.value())
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
@@ -280,7 +288,9 @@ class MainWindow(QMainWindow):
                                 f"clip-{stamp}.mp4")
         worker = VodClipWorker(self._current_url, window.start, window.end,
                                out_path, model=self.model_combo.currentText(),
-                               caption_style=self.caption_combo.currentText())
+                               caption_style=self.caption_combo.currentText(),
+                               device=self.device_combo.currentText(),
+                               performance_mode=self.performance_combo.currentText())
         worker.progress.connect(self.statusBar().showMessage)
         worker.finished_file.connect(self._on_clip_done)
         worker.failed.connect(self._on_clip_failed)
@@ -312,7 +322,9 @@ class MainWindow(QMainWindow):
         self._live_worker = LiveWorker(self._current_url, out_dir,
                                        z_threshold=self.z_spin.value(),
                                        model=self.model_combo.currentText(),
-                                       caption_style=self.caption_combo.currentText())
+                                       caption_style=self.caption_combo.currentText(),
+                                       performance_mode=self.performance_combo.currentText(),
+                                       device=self.device_combo.currentText())
         self._live_worker.event.connect(self._on_live_event)
         self._live_worker.failed.connect(self._on_live_failed)
         self._live_worker.stopped.connect(self._on_live_stopped)

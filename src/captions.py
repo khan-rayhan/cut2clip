@@ -22,9 +22,16 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import threading
 
 # ASS colours are &HBBGGRR&.
 CAPTION_STYLES = ("hormozi", "tiktok", "karaoke", "neon")
+
+# Reuse one Whisper model across sequential clips. Re-loading the model for
+# every clip adds substantial startup latency and disk/RAM churn.
+_WHISPER_CACHE_KEY = None
+_WHISPER_CACHE_MODEL = None
+_WHISPER_CACHE_LOCK = threading.Lock()
 
 # TikTok palette: pink, yellow, cyan, green.
 _TIKTOK_PALETTE = ("&H00A85CFF&", "&H000AD6FF&",
@@ -155,21 +162,37 @@ def words_to_ass(words: list[tuple[float, float, str]], out_path: str,
 
 
 def transcribe_words(path: str, model: str = "tiny",
-                     device: str = "auto") -> list[tuple[float, float, str]]:
-    """Transcribe *path* (audio or video) with faster-whisper and
-    return word-level (start, end, word) tuples. ``device`` is 'cuda'
-    when a GPU is present, else 'cpu'."""
+                     device: str = "auto",
+                     cpu_threads: int = 0) -> list[tuple[float, float, str]]:
+    """Transcribe with a cached faster-whisper model and low-latency decoding.
+
+    The model is loaded once and reused for subsequent clips. CPU inference
+    uses int8; CUDA uses float16. Greedy decoding reduces work on short
+    social clips while retaining word timestamps. (VAD was tried and
+    removed: faster-whisper's VAD drops sung vocals on real song audio,
+    returning zero words.)
+    """
+    global _WHISPER_CACHE_KEY, _WHISPER_CACHE_MODEL
     from faster_whisper import WhisperModel
 
     if device == "auto":
         try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
+            import ctranslate2
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception:
             device = "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
-    whisper = WhisperModel(model, device=device, compute_type=compute_type)
-    segments, _info = whisper.transcribe(path, word_timestamps=True)
+    cache_key = (model, device, compute_type, int(cpu_threads))
+    with _WHISPER_CACHE_LOCK:
+        if _WHISPER_CACHE_KEY != cache_key or _WHISPER_CACHE_MODEL is None:
+            _WHISPER_CACHE_MODEL = WhisperModel(
+                model, device=device, compute_type=compute_type,
+                cpu_threads=max(0, int(cpu_threads)))
+            _WHISPER_CACHE_KEY = cache_key
+        whisper = _WHISPER_CACHE_MODEL
+
+    segments, _info = whisper.transcribe(
+        path, word_timestamps=True, beam_size=1)
     words: list[tuple[float, float, str]] = []
     for segment in segments:
         for word in segment.words or []:
@@ -204,11 +227,13 @@ def filter_path(path: str) -> str:
     return "'" + s + "'"
 
 
-def burn_captions(video_path: str, ass_path: str, output_path: str) -> str:
-    """Burn the ASS subtitles into *video_path* with ffmpeg."""
+def burn_captions(video_path: str, ass_path: str, output_path: str,
+                  performance_mode: str = "auto") -> str:
+    """Burn ASS subtitles with the selected, hardware-aware encoder profile."""
+    from .performance import ffmpeg_video_args
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", video_path,
            "-vf", f"ass={filter_path(ass_path)}",
-           "-c:v", "libx264", "-pix_fmt", "yuv420p",
+           *ffmpeg_video_args(performance_mode),
            "-c:a", "copy", "-movflags", "+faststart", output_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

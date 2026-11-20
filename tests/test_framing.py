@@ -151,3 +151,17 @@ def test_split_layout_does_not_distort(tmp_path):
         w = xs.max() - xs.min() + 1
         h = ys.max() - ys.min() + 1
         assert 0.95 < h / w < 1.05, f"circle became {w}x{h}"
+
+
+def test_low_end_profile_uses_lower_sampling_and_detection_resolution():
+    from src.performance import get_profile
+    lite = get_profile("lite")
+    balanced = get_profile("balanced")
+    assert lite.sample_fps < balanced.sample_fps
+    assert lite.detection_width < balanced.detection_width
+    assert lite.ffmpeg_threads == 2
+
+
+def test_auto_profile_is_valid():
+    from src.performance import get_profile
+    assert get_profile("auto").name in {"lite", "balanced", "fast"}

@@ -167,7 +167,8 @@ def test_auto_top3_processes_first_three_windows(app, tmp_path):
         created = []
 
         def __init__(self, url, start, end, out_path, model="tiny",
-                     caption_style="hormozi"):
+                     caption_style="hormozi", device="auto",
+                     performance_mode="auto"):
             super().__init__()
             self.out_path = out_path
             FakeWorker.created.append(caption_style)

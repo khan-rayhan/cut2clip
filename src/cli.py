@@ -83,7 +83,8 @@ def cmd_live(args: argparse.Namespace) -> int:
     print(f"Clips go to: {args.out}  (Ctrl+C to stop)")
     monitor = LiveMonitor(args.url, args.out, z_threshold=args.z,
                           process=not args.no_process, model=args.model,
-                          caption_style=args.caption_style)
+                          caption_style=args.caption_style, device=args.device,
+                 performance_mode=args.performance)
     saved = monitor.run(duration_s=args.seconds, dry_run=args.dry_run)
     print(f"Done. Spikes: {monitor.spikes_seen}, clips saved: {len(saved)}")
     return 0
@@ -112,6 +113,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Log spikes without saving clips")
     p_live.add_argument("--model", default="tiny",
                         help="Whisper model size for captions")
+    p_live.add_argument("--performance", default="auto",
+                        choices=["auto", "lite", "balanced", "fast"],
+                        help="Processing profile")
+    p_live.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"],
+                        help="Whisper inference device")
     p_live.add_argument("--caption-style", default="hormozi",
                         choices=CAPTION_STYLES,
                         help="Caption style for live clips")
@@ -125,6 +131,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output MP4 path")
     p_proc.add_argument("--model", default="tiny",
                         help="Whisper model size (tiny, base, small, ...)")
+    p_proc.add_argument("--performance", default="auto",
+                        choices=["auto", "lite", "balanced", "fast"],
+                        help="Processing profile (default: auto)")
+    p_proc.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"],
+                        help="Whisper inference device")
     p_proc.add_argument("--caption-style", default="hormozi",
                         choices=CAPTION_STYLES,
                         help="Caption style (hormozi, tiktok, karaoke, neon)")
@@ -145,7 +156,8 @@ def cmd_process(args: argparse.Namespace) -> int:
     process_clip(args.input, args.out, model=args.model,
                  do_reframe=not args.no_reframe,
                  do_captions=not args.no_captions,
-                 caption_style=args.caption_style)
+                 caption_style=args.caption_style, device=args.device,
+                 performance_mode=args.performance)
     return 0
 
 

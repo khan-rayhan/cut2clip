@@ -70,3 +70,20 @@ def test_process_clip_output_on_other_filesystem(tmp_path):
         assert abs(_duration(str(out)) - 10.0) < 0.6
     finally:
         out.unlink(missing_ok=True)
+
+
+def test_process_clip_reframe_and_captions_single_output_encode(tmp_path, monkeypatch):
+    from src import captions
+
+    src = tmp_path / "src.mp4"
+    _make_subject_video(str(src), duration=2)
+    out = tmp_path / "captioned-vertical.mp4"
+    monkeypatch.setattr(captions, "transcribe_words",
+                        lambda *a, **k: [(0.1, 0.8, "hello")])
+    process_clip(str(src), str(out), do_captions=True, performance_mode="lite")
+    assert (1080, 1920) in _dims(str(out))
+    assert abs(_duration(str(out)) - 2.0) < 0.6
+    streams = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+         "-of", "csv=p=0", str(out)], text=True).splitlines()
+    assert "audio" in streams

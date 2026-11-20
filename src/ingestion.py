@@ -77,24 +77,47 @@ def _caption_urls(info: dict) -> dict[str, str]:
 
 
 def _extract(url: str, opts: dict, download: bool):
-    """Run yt-dlp once. On a certificate error (common behind MITM
-    proxies whose CA is not in certifi's bundle) retry once with
-    certificate checks off and warn, instead of failing outright."""
+    """Run yt-dlp once. On a certificate error, retry once with the OS
+    certificate store (``compat_opts={'no-certifi'}``) — verification
+    stays ON. yt-dlp loads certifi's bundled store by default, which
+    lacks a corporate/MITM proxy CA that the OS store (where such a CA
+    is installed) does have. If that also fails, fail loudly:
+    disabling verification only happens when the user explicitly opts
+    in with CUT2CLIP_ALLOW_INSECURE_YTDLP=1."""
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=download)
     except Exception as exc:
         msg = str(exc)
-        if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate verify failed" in msg:
-            import sys
-            print("WARNING: certificate check failed (proxy network?) - "
-                  "retrying with certificate verification off.",
-                  file=sys.stderr)
-            opts = {**opts, "nocheckcertificate": True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
+        if "CERTIFICATE_VERIFY_FAILED" not in msg and "certificate verify failed" not in msg:
+            raise
+        import sys
+        retry_opts = {
+            **opts,
+            "compat_opts": {*opts.get("compat_opts", set()), "no-certifi"},
+        }
+        print("WARNING: certificate check failed - retrying against the "
+              "OS certificate store (verification stays on).",
+              file=sys.stderr)
+        try:
+            with yt_dlp.YoutubeDL(retry_opts) as ydl:
                 return ydl.extract_info(url, download=download)
-        raise
-
+        except Exception as exc2:
+            if "CERTIFICATE_VERIFY_FAILED" not in str(exc2) and "certificate verify failed" not in str(exc2):
+                raise  # a different failure on retry: surface it as-is
+            if os.environ.get("CUT2CLIP_ALLOW_INSECURE_YTDLP") == "1":
+                print("WARNING: CUT2CLIP_ALLOW_INSECURE_YTDLP=1 - retrying with "
+                      "certificate verification OFF. This is insecure.",
+                      file=sys.stderr)
+                with yt_dlp.YoutubeDL({**opts, "nocheckcertificate": True}) as ydl:
+                    return ydl.extract_info(url, download=download)
+            print("ERROR: certificate verification failed even with the "
+                  "OS certificate store. Install your network's proxy CA "
+                  "in the OS store (or set SSL_CERT_FILE to a bundle "
+                  "that contains it), or (insecure, last resort only) set "
+                  "CUT2CLIP_ALLOW_INSECURE_YTDLP=1.",
+                  file=sys.stderr)
+            raise
 
 def probe(url: str) -> VideoInfo:
     """Probe *url* without downloading. Raises IngestionError on failure."""
