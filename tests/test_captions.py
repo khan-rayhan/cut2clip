@@ -95,3 +95,34 @@ def test_transcribe_real_audio(tmp_path):
     assert len(words) > 10
     assert words[-1][1] > 10.0  # words cover most of the 15s clip
     assert all(0 <= s < e for s, e, _ in words)
+
+
+# ---------------------------------------------------------------- caption paths
+
+def test_filter_path_quotes_and_escapes_windows_paths():
+    from src.captions import filter_path
+    assert (filter_path(r"C:\Users\me\AppData\Local\Temp\a.ass")
+            == "'C\\:/Users/me/AppData/Local/Temp/a.ass'")
+    assert filter_path("/tmp/a,b[1].ass") == "'/tmp/a,b[1].ass'"
+
+
+def test_burn_captions_with_colon_in_path(tmp_path):
+    """A ':' in the path (every Windows drive letter has one) used to make
+    ffmpeg fail with "Unable to parse option value"."""
+    import subprocess
+
+    from src.captions import burn_captions, words_to_ass
+
+    folder = tmp_path / "dir:with:colon"
+    folder.mkdir()
+    video = folder / "in.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+         "color=c=blue:size=1080x1920:rate=10:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video)],
+        check=True)
+    ass = words_to_ass([(0.2, 0.8, "hello"), (0.9, 1.5, "world")],
+                       str(folder / "c.ass"))
+    out = burn_captions(str(video), ass, str(folder / "out.mp4"))
+    assert (folder / "out.mp4").stat().st_size > 0 and out

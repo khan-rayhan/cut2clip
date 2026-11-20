@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.1 — 2026-11-20
+
+### Fixed
+- Windows: captions failed to burn because the `.ass` path (`C:\...`) was passed to the ffmpeg filter unquoted. The path is now quoted and escaped.
+- Split-screen layout stretched the picture (a round object came out 1.74x too tall on top and 0.80x too squat below). Panels now keep the source aspect ratio; the top panel sits on a blurred copy instead of being stretched.
+- Live mode saved raw 16:9 cuts. Every live clip now goes through reframe and captions. Cutting and processing run in separate workers so a slow render never lets the 80s buffer expire. A failed or interrupted clip keeps its raw cut as `<name>-raw.mp4`.
+- The audio fallback downloaded the whole audio track to disk. It is now streamed through ffmpeg and scored in memory (`ingestion.download_audio` is replaced by `ingestion.audio_stream_source`; the CLI `--keep-audio` option is removed).
+- `download_section` now checks the result with ffprobe and deletes it with an error if the file is far longer than requested.
+- `process_clip` and `Framer.reframe_video` used fixed temp file names, so two clips processed at once overwrote each other.
+- Closing the GUI or stopping the monitor no longer destroys a running worker thread, and the live buffer folder is deleted when monitoring stops.
+
 ## v1.0.0 — 2026-11-18
 
 First release. A desktop app (Windows first, macOS second) that

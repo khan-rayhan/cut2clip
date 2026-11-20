@@ -6,7 +6,7 @@
 ; exe by shorts-app.spec, so the installer only copies files.
 ; Per-user install: no admin rights needed.
 
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 
 [Setup]
 AppName=Shorts App

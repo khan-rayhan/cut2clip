@@ -51,7 +51,8 @@ def test_monitor_saves_clip_on_burst(tmp_path):
     src = tmp_path / "src.mp4"
     _make_test_video(str(src))
     out_dir = tmp_path / "clips"
-    monitor = LiveMonitor("https://example.invalid/live", str(out_dir))
+    monitor = LiveMonitor("https://example.invalid/live", str(out_dir),
+                          process=False)  # this test checks the raw cut
     # Short baseline so the test does not need 60s of history.
     monitor.velocity = ChatVelocity(min_baseline_s=10, baseline_s=60)
     saved = monitor.run(duration_s=60, chat_iter=_scripted_chat(),
@@ -59,3 +60,82 @@ def test_monitor_saves_clip_on_burst(tmp_path):
     assert monitor.spikes_seen == 1
     assert len(saved) == 1
     assert abs(_duration(saved[0]) - 40.0) < 0.6
+
+
+# ---------------------------------------------------------------- processing
+
+import os
+import shutil
+
+
+class _FakeBuffer:
+    def extract_clip(self, start, end, out_path):
+        with open(out_path, "wb") as fh:
+            fh.write(b"raw-cut")
+        return out_path
+
+    def stop(self):
+        pass
+
+
+def _run_workers_once(monitor, out_path):
+    """Queue one already-due window and drain both workers."""
+    os.makedirs(monitor.out_dir, exist_ok=True)
+    monitor.buffer = _FakeBuffer()
+    monitor._pending.append((time.time() - 100, time.time() - 60, out_path))
+    clip_thread, proc_thread = monitor._start_workers()
+    monitor._stop.set()
+    clip_thread.join(timeout=10)
+    monitor._finish_processing(proc_thread)
+
+
+def test_live_clip_goes_through_processing(tmp_path):
+    """The saved clip is the processed one, not the raw 16:9 cut."""
+    out_dir = tmp_path / "clips"
+    out_path = str(out_dir / "live-x.mp4")
+    calls = []
+
+    def fake_process(raw, out, model, log):
+        calls.append((raw, out, model))
+        assert os.path.exists(raw)
+        with open(out, "wb") as fh:
+            fh.write(b"processed")
+
+    events = []
+    monitor = LiveMonitor("u", str(out_dir), model="base",
+                          process_fn=fake_process, on_event=events.append)
+    _run_workers_once(monitor, out_path)
+
+    assert monitor.clips_saved == [out_path]
+    assert open(out_path, "rb").read() == b"processed"
+    assert calls and calls[0][1] == out_path and calls[0][2] == "base"
+    assert not os.path.exists(calls[0][0])        # raw cut cleaned up
+    assert not os.path.exists(monitor._raw_dir)   # and its folder
+    assert any(e["type"] == "clip" and e["path"] == out_path for e in events)
+
+
+def test_failed_processing_keeps_the_raw_cut(tmp_path):
+    out_dir = tmp_path / "clips"
+    out_path = str(out_dir / "live-y.mp4")
+
+    def boom(raw, out, model, log):
+        raise RuntimeError("whisper exploded")
+
+    monitor = LiveMonitor("u", str(out_dir), process_fn=boom)
+    _run_workers_once(monitor, out_path)
+
+    kept = str(out_dir / "live-y-raw.mp4")
+    assert os.path.exists(kept) and open(kept, "rb").read() == b"raw-cut"
+    assert monitor.clips_saved == []
+
+
+def test_abort_keeps_raw_cuts_without_processing(tmp_path):
+    out_dir = tmp_path / "clips"
+    out_path = str(out_dir / "live-z.mp4")
+    called = []
+    monitor = LiveMonitor("u", str(out_dir),
+                          process_fn=lambda *a, **k: called.append(1))
+    monitor.stop(abort_processing=True)
+    _run_workers_once(monitor, out_path)
+    assert not called
+    assert os.path.exists(str(out_dir / "live-z-raw.mp4"))

@@ -2,19 +2,17 @@
 
 Usage:
     python -m src.cli probe <url>
-    python -m src.cli clips <url> [-n N] [--keep-audio PATH]
+    python -m src.cli clips <url> [-n N]
 
 ``clips`` uses the Most Replayed heatmap when it exists. Otherwise it
-downloads best audio to a temp file and falls back to audio energy
-plus transcript hook density.
+streams the audio through ffmpeg (nothing is saved to disk) and falls
+back to audio energy plus transcript hook density.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-import tempfile
 
 from . import highlights, ingestion
 from .live_monitor import LiveMonitor
@@ -58,22 +56,14 @@ def cmd_clips(args: argparse.Namespace) -> int:
         _print_windows(windows)
         return 0
     print("No heatmap. Falling back to audio energy + transcript...")
-    tmp = args.keep_audio
-    own_tmp = tmp is None
-    if own_tmp:
-        fd, tmp = tempfile.mkstemp(suffix=".m4a")
-        os.close(fd)
-    try:
-        ingestion.download_audio(args.url, tmp)
-        caption_url = info.auto_caption_urls.get("en") or next(
-            iter(info.auto_caption_urls.values()), None)
-        windows = highlights.combined_windows(tmp, caption_url,
-                                              info.duration, top_n=args.n)
-        _print_windows(windows)
-        return 0 if windows else 1
-    finally:
-        if own_tmp and os.path.exists(tmp):
-            os.remove(tmp)
+    audio_url, headers = ingestion.audio_stream_source(args.url)
+    caption_url = info.auto_caption_urls.get("en") or next(
+        iter(info.auto_caption_urls.values()), None)
+    windows = highlights.combined_windows(audio_url, caption_url,
+                                          info.duration, top_n=args.n,
+                                          audio_headers=headers)
+    _print_windows(windows)
+    return 0 if windows else 1
 
 
 def cmd_live(args: argparse.Namespace) -> int:
@@ -83,7 +73,8 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 1
     print(f"Monitoring live: {info.title}")
     print(f"Clips go to: {args.out}  (Ctrl+C to stop)")
-    monitor = LiveMonitor(args.url, args.out, z_threshold=args.z)
+    monitor = LiveMonitor(args.url, args.out, z_threshold=args.z,
+                          process=not args.no_process, model=args.model)
     saved = monitor.run(duration_s=args.seconds, dry_run=args.dry_run)
     print(f"Done. Spikes: {monitor.spikes_seen}, clips saved: {len(saved)}")
     return 0
@@ -99,8 +90,6 @@ def main(argv: list[str] | None = None) -> int:
     p_clips = sub.add_parser("clips", help="List ranked 40-second windows")
     p_clips.add_argument("url")
     p_clips.add_argument("-n", type=int, default=5, help="Max windows")
-    p_clips.add_argument("--keep-audio", default=None,
-                         help="Keep the downloaded audio at this path")
     p_clips.set_defaults(fn=cmd_clips)
     p_live = sub.add_parser("live", help="Monitor a live stream for chat spikes")
     p_live.add_argument("url")
@@ -112,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Z-score trigger threshold")
     p_live.add_argument("--dry-run", action="store_true",
                         help="Log spikes without saving clips")
+    p_live.add_argument("--model", default="tiny",
+                        help="Whisper model size for captions")
+    p_live.add_argument("--no-process", action="store_true",
+                        help="Save raw 16:9 cuts only (no reframe, no captions)")
     p_live.set_defaults(fn=cmd_live)
     p_proc = sub.add_parser("process",
                             help="Reframe a clip to 1080x1920 and burn captions")

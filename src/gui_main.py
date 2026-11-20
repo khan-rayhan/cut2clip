@@ -27,8 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     # relative import (``from .gui...``) fails with "attempted
     # relative import with no known parent package".
     from src.gui.main_window import MainWindow
+    from src.gui.theme import apply_theme
 
     app = QApplication(list(argv or sys.argv))
+    apply_theme(app)
     window = MainWindow()
     if "--smoke-test" in (argv or sys.argv):
         window.show()

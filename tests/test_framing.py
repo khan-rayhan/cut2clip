@@ -111,3 +111,43 @@ def test_mediapipe_finds_real_face(tmp_path):
     framer.reframe_video(str(out))
     assert (1080, 1920) in _dims(str(out))
     assert abs(_duration(str(out)) - 15.0) < 1.0
+
+
+# ---------------------------------------------------------------- split layout
+
+def test_fit_size_and_panel_crop_keep_aspect():
+    from src.framing import fit_size, panel_crop_size
+    assert fit_size(1920, 1080, 1080, 1056) == (1080, 608)
+    for fw, fh in ((1920, 1080), (1280, 720), (1080, 1080)):
+        cw, ch = panel_crop_size(fw, fh, 1080, 864)
+        assert cw <= fw and ch <= fh
+        assert abs(cw / ch - 1080 / 864) < 0.01
+
+
+def test_split_layout_does_not_distort(tmp_path):
+    """A round object must stay round in both panels (it used to come
+    out 1.74x too tall on top and 0.80x too squat at the bottom)."""
+    import cv2
+    import numpy as np
+
+    from src import framing
+
+    src = tmp_path / "src.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+         "color=c=gray:size=1920x1080:rate=5:duration=1",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)], check=True)
+    framer = Framer(str(src))
+    framer.layout = "split"
+    framer.centers = [960.0, 960.0]
+    frame = np.full((1080, 1920, 3), 40, np.uint8)
+    cv2.circle(frame, (960, 540), 200, (255, 255, 255), -1)
+    out = framer._reframe_frame(frame, 0.0)
+    assert out.shape == (1920, 1080, 3)
+
+    top_h = int(1920 * framing.SPLIT_TOP_FRAC)
+    for region in (out[:top_h], out[top_h:]):
+        ys, xs = np.where(region[:, :, 0] > 200)
+        w = xs.max() - xs.min() + 1
+        h = ys.max() - ys.min() + 1
+        assert 0.95 < h / w < 1.05, f"circle became {w}x{h}"

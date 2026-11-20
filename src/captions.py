@@ -106,10 +106,23 @@ def extract_audio(video_path: str, out_path: str | None = None) -> str:
     return out_path
 
 
+def filter_path(path: str) -> str:
+    """Quote and escape a file path for an ffmpeg filter argument.
+
+    ffmpeg parses filter text twice, and ':' separates filter options,
+    so an unquoted Windows path like C:\\Users\\me\\a.ass breaks the
+    filter. Inside single quotes the path survives the first parse and
+    only ':' needs a backslash for the second one: 'C\\:/Users/me/a.ass'.
+    """
+    s = str(path).replace("\\", "/").replace(":", "\\:")
+    s = s.replace("'", "'\\''")
+    return "'" + s + "'"
+
+
 def burn_captions(video_path: str, ass_path: str, output_path: str) -> str:
     """Burn the ASS subtitles into *video_path* with ffmpeg."""
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", video_path,
-           "-vf", f"ass={ass_path}",
+           "-vf", f"ass={filter_path(ass_path)}",
            "-c:v", "libx264", "-pix_fmt", "yuv420p",
            "-c:a", "copy", "-movflags", "+faststart", output_path]
     result = subprocess.run(cmd, capture_output=True, text=True)

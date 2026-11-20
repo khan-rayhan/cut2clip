@@ -50,18 +50,15 @@ class ClipsWorker(QThread):
             if windows:
                 self.finished_windows.emit(windows)
                 return
-            fd, tmp = tempfile.mkstemp(suffix=".m4a")
-            os.close(fd)
-            try:
-                ingestion.download_audio(self.url, tmp)
-                caption_url = info.auto_caption_urls.get("en") or next(
-                    iter(info.auto_caption_urls.values()), None)
-                windows = highlights.combined_windows(
-                    tmp, caption_url, info.duration, top_n=self.top_n)
-                self.finished_windows.emit(windows)
-            finally:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
+            # Audio is streamed through ffmpeg and scored on the fly:
+            # no part of the video or audio is saved to disk.
+            audio_url, headers = ingestion.audio_stream_source(self.url)
+            caption_url = info.auto_caption_urls.get("en") or next(
+                iter(info.auto_caption_urls.values()), None)
+            windows = highlights.combined_windows(
+                audio_url, caption_url, info.duration, top_n=self.top_n,
+                audio_headers=headers)
+            self.finished_windows.emit(windows)
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -111,11 +108,13 @@ class LiveWorker(QThread):
     failed = Signal(str)
     stopped = Signal()
 
-    def __init__(self, url: str, out_dir: str, z_threshold: float = 2.5):
+    def __init__(self, url: str, out_dir: str, z_threshold: float = 2.5,
+                 model: str = "tiny"):
         super().__init__()
         self.url = url
         self.out_dir = out_dir
         self.z_threshold = z_threshold
+        self.model = model
         self._monitor: LiveMonitor | None = None
 
     def _on_event(self, event: dict) -> None:
@@ -125,13 +124,15 @@ class LiveWorker(QThread):
         try:
             self._monitor = LiveMonitor(
                 self.url, self.out_dir, z_threshold=self.z_threshold,
-                on_event=self._on_event)
+                on_event=self._on_event, model=self.model)
             self._monitor.run()
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
             self.stopped.emit()
 
-    def stop(self) -> None:
+    def stop(self, abort_processing: bool = False) -> None:
+        """Stop monitoring. Clips already cut keep processing unless
+        ``abort_processing`` is set (used when the window closes)."""
         if self._monitor is not None:
-            self._monitor._stop.set()
+            self._monitor.stop(abort_processing=abort_processing)

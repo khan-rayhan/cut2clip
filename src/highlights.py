@@ -113,32 +113,55 @@ def heatmap_windows(heatmap: list[HeatPoint], duration: float,
     return select_windows(peaks, duration, clip_len, source="heatmap")
 
 
-def audio_energy_series(audio_path: str,
-                        window_s: float = 1.0) -> tuple[list[float], list[float]]:
-    """RMS energy per window from an audio file via an ffmpeg pipe.
+def audio_energy_series(audio_path: str, window_s: float = 1.0,
+                        headers: dict | None = None
+                        ) -> tuple[list[float], list[float]]:
+    """RMS energy per window, streamed through an ffmpeg pipe.
 
-    Returns (window centre times, RMS values). No heavy dependency:
-    ffmpeg decodes to mono 16 kHz float samples, numpy does the rest.
+    ``audio_path`` is a file path or an http(s) URL (with ``headers``
+    when the URL needs them). Audio is decoded in chunks and reduced
+    to one number per window as it arrives, so nothing is saved to
+    disk and memory stays flat however long the video is.
+
+    Returns (window centre times, RMS values).
     """
-    cmd = ["ffmpeg", "-v", "error", "-i", audio_path,
-           "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "f32le", "-"]
-    raw = subprocess.run(cmd, capture_output=True, check=True).stdout
-    samples = np.frombuffer(raw, dtype=np.float32)
+    cmd = ["ffmpeg", "-v", "error"]
+    if headers:
+        cmd += ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())]
+    cmd += ["-i", audio_path, "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+            "-f", "f32le", "-"]
     per_window = int(SAMPLE_RATE * window_s)
-    n = len(samples) // per_window
-    if n == 0:
-        return [], []
-    trimmed = samples[: n * per_window].reshape(n, per_window)
-    rms = np.sqrt(np.mean(trimmed ** 2, axis=1))
-    times = [(i + 0.5) * window_s for i in range(n)]
-    return times, [float(v) for v in rms]
+    win_bytes = per_window * 4
+    rms: list[float] = []
+    buf = bytearray()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    try:
+        while True:
+            chunk = proc.stdout.read(1 << 16)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            n = len(buf) // win_bytes
+            if n:
+                block = np.frombuffer(bytes(buf[: n * win_bytes]),
+                                      dtype=np.float32).reshape(n, per_window)
+                rms.extend(np.sqrt(np.mean(block ** 2, axis=1)).tolist())
+                del buf[: n * win_bytes]
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
+    times = [(i + 0.5) * window_s for i in range(len(rms))]
+    return times, rms
 
 
 def audio_windows(audio_path: str, duration: float,
                   top_n: int = 5,
-                  clip_len: float = CLIP_LEN) -> list[ClipWindow]:
+                  clip_len: float = CLIP_LEN,
+                  headers: dict | None = None) -> list[ClipWindow]:
     """Windows from audio energy peaks alone."""
-    times, rms = audio_energy_series(audio_path)
+    times, rms = audio_energy_series(audio_path, headers=headers)
     if not times:
         return []
     peak = max(rms)
@@ -185,10 +208,12 @@ def hook_density_score(events: list[tuple[float, str]],
 
 def combined_windows(audio_path: str, caption_url: str | None,
                      duration: float, top_n: int = 5,
-                     clip_len: float = CLIP_LEN) -> list[ClipWindow]:
+                     clip_len: float = CLIP_LEN,
+                     audio_headers: dict | None = None) -> list[ClipWindow]:
     """Fallback windows: 60 percent audio energy, 40 percent hook
-    density when captions exist, audio alone when they do not."""
-    times, rms = audio_energy_series(audio_path)
+    density when captions exist, audio alone when they do not.
+    ``audio_path`` may be a streamed URL (see ingestion.audio_stream_source)."""
+    times, rms = audio_energy_series(audio_path, headers=audio_headers)
     if not times:
         return []
     peak = max(rms)

@@ -52,6 +52,46 @@ def decide_layout(n_faces_per_sample: list[int],
     return "split" if sum(1 for n in n_faces_per_sample if n >= 2) >= need else "single"
 
 
+def fit_size(src_w: int, src_h: int, box_w: int, box_h: int) -> tuple[int, int]:
+    """Largest size with the source's aspect ratio that fits in the box."""
+    s = min(box_w / src_w, box_h / src_h)
+    return max(1, int(round(src_w * s))), max(1, int(round(src_h * s)))
+
+
+def panel_crop_size(frame_w: int, frame_h: int,
+                    panel_w: int, panel_h: int) -> tuple[int, int]:
+    """Largest crop of the frame that has the panel's aspect ratio, so
+    resizing it to the panel never stretches or squashes the picture."""
+    aspect = panel_w / panel_h
+    crop_h = frame_h
+    crop_w = int(round(crop_h * aspect))
+    if crop_w > frame_w:
+        crop_w = frame_w
+        crop_h = int(round(crop_w / aspect))
+    return crop_w, crop_h
+
+
+def content_panel(frame: np.ndarray, panel_w: int, panel_h: int) -> np.ndarray:
+    """The whole frame, fitted without distortion, over a blurred and
+    darkened copy of itself so the leftover space is not black."""
+    h, w = frame.shape[:2]
+    fw, fh = fit_size(w, h, panel_w, panel_h)
+    fg = cv2.resize(frame, (fw, fh), interpolation=cv2.INTER_AREA)
+    if (fw, fh) == (panel_w, panel_h):
+        return fg
+    cw, ch = panel_crop_size(w, h, panel_w, panel_h)
+    y, x = (h - ch) // 2, (w - cw) // 2
+    bg = cv2.resize(frame[y:y + ch, x:x + cw],
+                    (max(1, panel_w // 8), max(1, panel_h // 8)),
+                    interpolation=cv2.INTER_AREA)
+    bg = cv2.GaussianBlur(bg, (0, 0), 3)
+    bg = cv2.resize(bg, (panel_w, panel_h), interpolation=cv2.INTER_LINEAR)
+    bg = cv2.convertScaleAbs(bg, alpha=0.45)
+    oy, ox = (panel_h - fh) // 2, (panel_w - fw) // 2
+    bg[oy:oy + fh, ox:ox + fw] = fg
+    return bg
+
+
 # ---------------------------------------------------------------- detectors
 
 _mediapipe_detector = None
@@ -254,10 +294,12 @@ class Framer:
         # Split-screen: content on top, speaker on the bottom.
         top_h = int(OUT_H * SPLIT_TOP_FRAC)
         bottom_h = OUT_H - top_h
-        content = cv2.resize(frame, (OUT_W, top_h))
-        speaker_w = int(round(bottom_h * 1.25))
-        x = crop_x_for_center(self.w, speaker_w, cx)
-        speaker = cv2.resize(frame[:, x:x + speaker_w], (OUT_W, bottom_h))
+        content = content_panel(frame, OUT_W, top_h)
+        crop_w, crop_h = panel_crop_size(self.w, self.h, OUT_W, bottom_h)
+        x = crop_x_for_center(self.w, crop_w, cx)
+        y = (self.h - crop_h) // 2
+        speaker = cv2.resize(frame[y:y + crop_h, x:x + crop_w],
+                             (OUT_W, bottom_h))
         return np.vstack([content, speaker])
 
     def reframe_video(self, output_path: str) -> str:
@@ -265,8 +307,12 @@ class Framer:
         audio back, producing an H.264/AAC MP4 at 1080x1920."""
         if not self.centers:
             self.compute_trajectory()
-        tmp_video = os.path.join(tempfile.gettempdir(),
-                                 "shorts-reframe-video.mp4")
+        # Next to the output, not a fixed name in the temp folder, so two
+        # reframes running at once cannot overwrite each other.
+        fd, tmp_video = tempfile.mkstemp(
+            suffix=".mp4", prefix="shorts-reframe-",
+            dir=os.path.dirname(os.path.abspath(output_path)))
+        os.close(fd)
         cap = cv2.VideoCapture(self.video_path)
         writer = cv2.VideoWriter(
             tmp_video, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (OUT_W, OUT_H))

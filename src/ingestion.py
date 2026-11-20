@@ -121,20 +121,43 @@ def probe(url: str) -> VideoInfo:
     )
 
 
-def download_audio(url: str, out_path: str) -> str:
-    """Download best audio only to *out_path*. Returns the path."""
+def audio_stream_source(url: str) -> tuple[str, dict]:
+    """Direct audio URL plus the HTTP headers it needs, without
+    downloading anything. ffmpeg reads it as a stream and the audio
+    never touches the disk (see highlights.audio_energy_series)."""
     opts = {
         "quiet": True,
         "no_warnings": True,
+        "skip_download": True,
         "format": "bestaudio/best",
-        "outtmpl": out_path,
         "noplaylist": True,
     }
     try:
-        _extract(url, opts, download=True)
+        info = _extract(url, opts, download=False)
     except Exception as exc:
-        raise IngestionError(f"Could not download audio for {url!r}: {exc}") from exc
-    return out_path
+        raise IngestionError(f"Could not open audio for {url!r}: {exc}") from exc
+    media_url = info.get("url") if isinstance(info, dict) else None
+    if not media_url:
+        raise IngestionError(f"No streamable audio URL for {url!r}")
+    return media_url, dict(info.get("http_headers") or {})
+
+
+# A section download longer than the request by more than this means the
+# format could not be cut, so the whole video came down. Treated as a failure.
+MAX_OVERSHOOT_S = 10.0
+
+
+def _media_duration(path: str) -> float | None:
+    """Duration in seconds via ffprobe, or None when it cannot be read."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", path],
+            capture_output=True, text=True).stdout.strip()
+        return float(out) if out else None
+    except (OSError, ValueError):
+        return None
 
 
 def _fmt_clock(seconds: float) -> str:
@@ -178,4 +201,10 @@ def download_section(url: str, start: float, end: float,
         ) from exc
     if not os.path.exists(out_path):
         raise IngestionError(f"Download finished but {out_path!r} is missing.")
+    got = _media_duration(out_path)
+    if got is not None and got > (end - start) + MAX_OVERSHOOT_S:
+        os.remove(out_path)  # never leave a full-length video on disk
+        raise IngestionError(
+            f"Asked for {end - start:.0f}s but got {got:.0f}s, so the whole "
+            f"video was downloaded. The file was deleted.")
     return out_path

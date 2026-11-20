@@ -26,6 +26,13 @@ def _fmt(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
+def _repolish(widget) -> None:
+    """Re-apply the style sheet after an objectName change."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings_org: str = ORG, settings_app: str = APP):
         super().__init__()
@@ -45,16 +52,22 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
 
+        hero = QLabel("▶  Shorts App  •  40-second vertical Shorts & Reels")
+        hero.setObjectName("hero")
+        layout.addWidget(hero)
+
         url_row = QHBoxLayout()
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("Paste a YouTube / Twitch / Facebook URL ...")
         self.detect_button = QPushButton("Detect")
+        self.detect_button.setObjectName("primary")
         self.detect_button.clicked.connect(self._on_detect)
         url_row.addWidget(self.url_edit)
         url_row.addWidget(self.detect_button)
         layout.addLayout(url_row)
 
         self.info_label = QLabel("Paste a URL and press Detect.")
+        self.info_label.setObjectName("info")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
@@ -66,6 +79,7 @@ class MainWindow(QMainWindow):
         vod_layout.addWidget(self.windows_list)
         vod_buttons = QHBoxLayout()
         self.process_button = QPushButton("Process selected")
+        self.process_button.setObjectName("primary")
         self.process_button.setEnabled(False)
         self.process_button.clicked.connect(self._on_process_selected)
         vod_buttons.addWidget(self.process_button)
@@ -85,6 +99,7 @@ class MainWindow(QMainWindow):
         self.z_spin.setValue(2.5)
         live_controls.addWidget(self.z_spin)
         self.live_button = QPushButton("Start monitoring")
+        self.live_button.setObjectName("accent")
         self.live_button.setEnabled(False)
         self.live_button.clicked.connect(self._on_live_toggle)
         live_controls.addWidget(self.live_button)
@@ -141,7 +156,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
         self._save_settings()
-        self._stop_live()
+        self._stop_live(abort=True)
         super().closeEvent(event)
 
     # ------------------------------------------------------------ detect
@@ -259,11 +274,14 @@ class MainWindow(QMainWindow):
         out_dir = self.out_edit.text().strip()
         os.makedirs(out_dir, exist_ok=True)
         self._live_worker = LiveWorker(self._current_url, out_dir,
-                                       z_threshold=self.z_spin.value())
+                                       z_threshold=self.z_spin.value(),
+                                       model=self.model_combo.currentText())
         self._live_worker.event.connect(self._on_live_event)
         self._live_worker.failed.connect(self._on_live_failed)
         self._live_worker.stopped.connect(self._on_live_stopped)
         self._live_worker.start()
+        self.live_button.setObjectName("danger")
+        _repolish(self.live_button)
         self.live_button.setText("Stop monitoring")
         self.live_log.appendPlainText("Monitoring started.")
         self.statusBar().showMessage("Monitoring live chat ...")
@@ -273,6 +291,8 @@ class MainWindow(QMainWindow):
             self.live_log.appendPlainText(
                 f"SPIKE {event['time']}  z={event['z']:.1f}  "
                 f"{event['count']} msgs/10s")
+        elif event["type"] == "status":
+            self.live_log.appendPlainText(event["text"])
         elif event["type"] == "clip":
             self.live_clips.addItem(event["path"])
             self.outputs_list.addItem(event["path"])
@@ -283,16 +303,31 @@ class MainWindow(QMainWindow):
 
     def _on_live_stopped(self) -> None:
         self._live_worker = None
+        self.live_button.setEnabled(True)
+        self.live_button.setObjectName("accent")
+        _repolish(self.live_button)
         self.live_button.setText("Start monitoring")
         self.live_log.appendPlainText("Monitoring stopped.")
         self.statusBar().showMessage("Ready.")
 
-    def _stop_live(self) -> None:
-        if self._live_worker is not None:
-            worker = self._live_worker
+    def _stop_live(self, abort: bool = False) -> None:
+        """Stop monitoring. Normally the worker is left running until it
+        has finished the clips already cut (the ``stopped`` signal then
+        resets the button). On window close (``abort``) unfinished clips
+        are saved raw and the thread is waited for, never destroyed
+        while still running."""
+        worker = self._live_worker
+        if worker is None:
+            return
+        worker.stop(abort_processing=abort)
+        if abort:
+            if not worker.wait(15000):
+                worker.terminate()
+                worker.wait(2000)
             self._live_worker = None
-            worker.stop()
-            worker.wait(5000)
+        else:
+            self.live_button.setEnabled(False)
+            self.live_button.setText("Finishing clips ...")
 
     # ------------------------------------------------------------ misc
 

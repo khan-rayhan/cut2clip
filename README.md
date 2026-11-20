@@ -56,10 +56,12 @@ model, device, Z threshold) are remembered between runs.
 # Show metadata for a URL (VOD vs live, heatmap, captions)
 .venv/bin/python -m src.cli probe "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Ranked 40-second highlight windows (heatmap, else audio + transcript fallback)
+# Ranked 40-second highlight windows (heatmap, else audio + transcript fallback;
+# the audio is streamed and scored in memory, never saved)
 .venv/bin/python -m src.cli clips "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -n 3
 
-# Monitor a live stream for chat spikes (saves 40s clips)
+# Monitor a live stream for chat spikes (saves finished 9:16 captioned clips;
+# add --no-process for raw 16:9 cuts, --model small for better captions)
 .venv/bin/python -m src.cli live "<live url>" --seconds 600 --out live-clips
 
 # Reframe a local clip to 1080x1920 and burn captions
