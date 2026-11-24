@@ -6,6 +6,8 @@ fully buffered.
 """
 
 import subprocess
+
+import pytest
 import time
 
 from src.live_chat import ChatVelocity
@@ -47,6 +49,7 @@ def _scripted_chat():
         time.sleep(0.5)
 
 
+@pytest.mark.slow
 def test_monitor_saves_clip_on_burst(tmp_path):
     src = tmp_path / "src.mp4"
     _make_test_video(str(src))
@@ -96,7 +99,8 @@ def test_live_clip_goes_through_processing(tmp_path):
     calls = []
 
     def fake_process(raw, out, model, log, caption_style="hormozi",
-                     performance_mode="auto", device="auto"):
+                     performance_mode="auto", device="auto",
+                     progress_cb=None):
         calls.append((raw, out, model, caption_style))
         assert os.path.exists(raw)
         with open(out, "wb") as fh:

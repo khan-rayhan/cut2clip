@@ -1,6 +1,7 @@
 """Tests for caption generation and burning."""
 
 import subprocess
+import sys
 
 import cv2
 import pytest
@@ -78,12 +79,15 @@ def test_burn_captions_changes_pixels(tmp_path):
     assert _caption_region_mean(str(out)) - _caption_region_mean(str(src)) > 1.0
 
 
+@pytest.mark.integration
 def test_transcribe_real_audio(tmp_path):
     audio = tmp_path / "rick.m4a"
-    yt_dlp = str(__import__("pathlib").Path(__file__).parent.parent
-                 / ".venv" / "bin" / "yt-dlp")
+    try:
+        import yt_dlp  # noqa: F401
+    except ImportError:
+        pytest.skip("yt-dlp is not installed")
     dl = subprocess.run(
-        [yt_dlp, "-q", "--no-check-certificate",
+        [sys.executable, "-m", "yt_dlp", "-q", "--no-check-certificate",
          "-f", "ba",
          "--download-sections", "*00:00:30-00:00:45",
          "-o", str(audio),

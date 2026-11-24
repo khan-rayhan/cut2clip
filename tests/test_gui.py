@@ -63,13 +63,31 @@ def test_settings_roundtrip(app):
     org, name = "ShortsAppTest", "TestSettings"
     first = MainWindow(settings_org=org, settings_app=name)
     first.out_edit.setText("/tmp/test-clips")
-    first.model_combo.setCurrentText("base")
+    first.model_combo.setCurrentIndex(first.model_combo.findData("base"))
     first._save_settings()
     first.close()
     second = MainWindow(settings_org=org, settings_app=name)
     assert second.out_edit.text() == "/tmp/test-clips"
-    assert second.model_combo.currentText() == "base"
+    assert second.model_combo.currentData() == "base"
+    assert second.model_combo.currentText() == "Base"
     second.close()
+
+
+def test_spike_threshold_level_label(app):
+    """The level next to the spike threshold number follows the value:
+    below 2.0 Low, 2.0–3.0 Medium, above 3.0 High."""
+    from PySide6.QtCore import QSettings
+
+    org, name = "ShortsAppTest", "TestZLevel"
+    QSettings(org, name).clear()
+    window = MainWindow(settings_org=org, settings_app=name)
+    assert window.z_spin.value() == 2.5
+    assert window.z_level_label.text() == "Medium"
+    window.z_spin.setValue(1.5)
+    assert window.z_level_label.text() == "Low"
+    window.z_spin.setValue(4.0)
+    assert window.z_level_label.text() == "High"
+    window.close()
 
 
 def test_probe_worker_invalid_url(app):
@@ -143,13 +161,15 @@ def test_caption_combo_and_roundtrip(app):
     first = MainWindow(settings_org=org, settings_app=name)
     assert first.caption_combo.count() == 4
     assert [first.caption_combo.itemText(i) for i in range(4)] == [
-        "hormozi", "tiktok", "karaoke", "neon"]
-    assert first.caption_combo.currentText() == "hormozi"
-    first.caption_combo.setCurrentText("neon")
+        "Hormozi", "TikTok", "Karaoke", "Neon"]
+    assert first.caption_combo.currentData() == "hormozi"
+    assert first.caption_combo.currentText() == "Hormozi"
+    first.caption_combo.setCurrentIndex(first.caption_combo.findData("neon"))
     first._save_settings()
     first.close()
     second = MainWindow(settings_org=org, settings_app=name)
-    assert second.caption_combo.currentText() == "neon"
+    assert second.caption_combo.currentData() == "neon"
+    assert second.caption_combo.currentText() == "Neon"
     second.close()
 
 
@@ -162,6 +182,7 @@ def test_auto_top3_processes_first_three_windows(app, tmp_path):
 
     class FakeWorker(QThread):
         progress = Signal(str)
+        progress_pct = Signal(int, str)
         finished_file = Signal(str)
         failed = Signal(str)
         created = []
@@ -179,7 +200,8 @@ def test_auto_top3_processes_first_three_windows(app, tmp_path):
     window = MainWindow(settings_org="ShortsAppTest", settings_app="TestAuto3")
     window.out_edit.setText(str(tmp_path))
     window._current_url = "https://example.invalid/x"
-    window.caption_combo.setCurrentText("tiktok")
+    window.caption_combo.setCurrentIndex(
+        window.caption_combo.findData("tiktok"))
     windows = [ClipWindow(start=float(10 + 40 * i), end=float(50 + 40 * i),
                           peak_time=float(30 + 40 * i), score=0.9 - 0.1 * i,
                           source="heatmap") for i in range(5)]
@@ -221,3 +243,39 @@ def test_clips_worker_falls_back_when_comments_fail(app):
     assert "error" not in received
     assert received["windows"]
     assert all(w.source == "heatmap" for w in received["windows"])
+
+
+def test_clips_worker_uses_audio_transcript_fallback_without_heatmap(app):
+    from src.highlights import ClipWindow
+
+    fake = VideoInfo(url="https://example.invalid/x", title="No Heatmap",
+                     duration=180.0, is_live=False, heatmap=[],
+                     auto_caption_urls={"en": "https://example.invalid/captions.json3"})
+    expected = [ClipWindow(start=20.0, end=60.0, peak_time=40.0,
+                           score=0.9, source="audio+transcript")]
+    received = {}
+    with mock.patch("src.ingestion.probe", return_value=fake), \
+         mock.patch("src.ingestion.fetch_comment_points", return_value=(None, 0)), \
+         mock.patch("src.ingestion.audio_stream_source",
+                    return_value=("https://example.invalid/audio", {"User-Agent": "test"})), \
+         mock.patch("src.gui.workers.highlights.combined_windows",
+                    return_value=expected) as fallback:
+        worker = ClipsWorker(fake.url)
+        worker.finished_windows.connect(lambda windows: received.setdefault("windows", windows))
+        worker.failed.connect(lambda message: received.setdefault("error", message))
+        _run_worker(worker)
+    assert received.get("windows") == expected
+    assert "error" not in received
+    fallback.assert_called_once_with(
+        "https://example.invalid/audio", fake.auto_caption_urls["en"],
+        180.0, top_n=5, audio_headers={"User-Agent": "test"})
+
+
+def test_existing_clip_output_is_not_overwritten(tmp_path):
+    from src.gui.main_window import _unused_output_path
+
+    original = tmp_path / "clip-00-20.mp4"
+    original.write_bytes(b"previous export")
+    second = _unused_output_path(str(original))
+    assert second.endswith("clip-00-20-2.mp4")
+    assert original.read_bytes() == b"previous export"

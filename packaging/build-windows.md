@@ -22,21 +22,28 @@ then open a terminal inside it.
 
 ## 3. Create the environment
 
+Recommended: double-click `scripts\setup_windows.bat`. It creates the Python 3.12 environment, installs all dependencies, and runs `python -m src.doctor`.
+
+Manual alternative:
 ```powershell
 py -3.12 -m venv .venv
 .venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install pyinstaller
+pip install -e .
 ```
 
 This downloads PySide6, faster-whisper, MediaPipe, OpenCV,
 onnxruntime, yt-dlp, streamlink and chat-downloader. It takes a
 few minutes on first install.
 
-## 4. Build the exe
+## 4. Build the exe and installer
 
+Recommended: run `scripts\build_windows.bat`. It checks dependencies, runs pytest, builds the EXE, runs the packaged GUI smoke test, and invokes Inno Setup if `iscc` is available.
+
+Manual EXE build:
 ```powershell
-pyinstaller cut2clip.spec
+pyinstaller --clean --noconfirm cut2clip.spec
 ```
 
 The build takes several minutes. The result is

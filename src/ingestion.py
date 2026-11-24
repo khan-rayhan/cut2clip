@@ -269,6 +269,10 @@ def download_section(url: str, start: float, end: float,
         "download_ranges": lambda info_dict, ydl: [
             {"start_time": start, "end_time": end}],
         "force_keyframes_at_cuts": True,
+        # An empty placeholder file at out_path (e.g. from mkstemp) makes
+        # yt-dlp report "already downloaded" and skip the download,
+        # leaving a 0-byte clip. Always replace whatever is there.
+        "overwrites": True,
     }
     try:
         _extract(url, opts, download=True)
@@ -278,6 +282,10 @@ def download_section(url: str, start: float, end: float,
         ) from exc
     if not os.path.exists(out_path):
         raise IngestionError(f"Download finished but {out_path!r} is missing.")
+    if os.path.getsize(out_path) == 0:
+        os.remove(out_path)
+        raise IngestionError(
+            f"Download of {start:.0f}-{end:.0f}s produced an empty file.")
     got = _media_duration(out_path)
     if got is not None and got > (end - start) + MAX_OVERSHOOT_S:
         os.remove(out_path)  # never leave a full-length video on disk

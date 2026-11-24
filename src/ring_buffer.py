@@ -16,6 +16,7 @@ import re
 import subprocess
 import threading
 import time
+from urllib.parse import urlparse
 
 SEGMENT_TIME = 10
 KEEP_SEGMENTS = 8  # 8 x 10s = 80s retained, above the 60s minimum
@@ -30,8 +31,8 @@ def _resolve_with_ytdlp(url: str) -> str:
     the direct stream URL. Prefers an HLS (.m3u8) format — the last
     one listed, which is the highest quality — so the ring buffer
     can segment it; otherwise takes the selected format's URL.
-    Certificate failures retry with verification off, the same as
-    ``ingestion._extract`` (whose retry this reuses)."""
+    Certificate failures follow ``ingestion._extract``'s retry, which
+    keeps verification on unless CUT2CLIP_ALLOW_INSECURE_YTDLP=1."""
     from .ingestion import _extract
 
     opts = {"quiet": True, "no_warnings": True, "skip_download": True,
@@ -52,6 +53,25 @@ def _resolve_with_ytdlp(url: str) -> str:
     raise RingBufferError(f"yt-dlp found no playable format for {url!r}")
 
 
+def _stream_url(stream) -> str | None:
+    """A plain URL for a streamlink stream, or None.
+
+    Only HLS/HTTP streams have one. Muxed streams (separate audio and
+    video) have no ``url`` attribute at all, which used to crash
+    ``resolve_stream_url`` with an AttributeError instead of falling
+    back to yt-dlp."""
+    if stream is None:
+        return None
+    url = getattr(stream, "url", None)
+    if isinstance(url, str) and url:
+        return url
+    try:
+        url = stream.to_url()
+    except Exception:
+        return None
+    return url if isinstance(url, str) and url else None
+
+
 def resolve_stream_url(url: str) -> str:
     """Return a playable HLS URL for *url*.
 
@@ -62,7 +82,7 @@ def resolve_stream_url(url: str) -> str:
     fail the error names both causes, so the GUI shows why it failed
     instead of an empty message.
     """
-    if url.endswith(".m3u8"):
+    if urlparse(url).path.endswith(".m3u8"):
         return url
     streamlink_error: str | None = None
     try:
@@ -77,9 +97,9 @@ def resolve_stream_url(url: str) -> str:
             streamlink_error = f"streamlink failed: {exc}"
         else:
             for quality in ("best", "1080p", "720p", "480p", "worst"):
-                stream = streams.get(quality)
-                if stream is not None:
-                    return stream.url
+                stream_url = _stream_url(streams.get(quality))
+                if stream_url:
+                    return stream_url
             streamlink_error = "streamlink found no playable stream"
     try:
         return _resolve_with_ytdlp(url)
@@ -141,6 +161,14 @@ class RingBuffer:
         self._stop.clear()
         self._pruner = threading.Thread(target=self._prune_loop, daemon=True)
         self._pruner.start()
+
+    def is_running(self) -> bool:
+        """True while the ffmpeg recorder process is alive."""
+        return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def exit_code(self) -> int | None:
+        return None if self._proc is None else self._proc.poll()
 
     def _segments(self) -> list[tuple[float, str]]:
         """(wall-clock start, path) for every segment on disk, oldest first."""
@@ -206,7 +234,8 @@ class RingBuffer:
         list_path = os.path.join(self.segment_dir, "concat.txt")
         with open(list_path, "w", encoding="utf-8") as f:
             for _, path in chosen:
-                f.write(f"file '{path}'\n")
+                escaped = path.replace("'", "'\\''")  # concat-file quoting
+                f.write(f"file '{escaped}'\n")
         cmd = [
             "ffmpeg", "-y", "-v", "error",
             "-f", "concat", "-safe", "0", "-i", list_path,

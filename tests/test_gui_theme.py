@@ -20,12 +20,94 @@ def _app():
     return app or QApplication([])
 
 
-def test_theme_stylesheet_has_brand_gradients():
+def test_theme_stylesheet_is_classic():
+    """The Liquid Glass theme uses solid colors only — no gradients —
+    with a transparent window (the artwork paints behind it) and
+    glass panels on top: transparent in the style sheet, the blur
+    and tint painted by the main window, a bright white rim."""
     app = _app()
     apply_theme(app)
     sheet = app.styleSheet()
-    assert "7c5cff" in sheet and "ff5c8a" in sheet and "ff9a3d" in sheet
+    assert "qlineargradient" not in sheet
+    assert "background: transparent" in sheet
+    # Glass panels carry a bright rim, not a solid fill.
+    assert "rgba(255, 255, 255, 0.7)" in sheet
     assert "QPushButton#primary" in sheet
+    assert "QPushButton#accent" in sheet and "QPushButton#danger" in sheet
+    assert "QPushButton#secondary" in sheet
+    # Input boxes are 70% transparent white with black text, including
+    # the spinbox up/down buttons and the combo drop-down arrow area.
+    assert "background: rgba(255, 255, 255, 0.30)" in sheet
+    assert "color: #111111" in sheet
+    assert "QSpinBox::up-button" in sheet
+    assert "QComboBox::drop-down" in sheet
+    # Every combo shows a visible down chevron, not just a white box.
+    assert "QComboBox::down-arrow" in sheet
+    assert "down-arrow.png" in sheet
+    # The bottom option labels and values are bold, same font and size.
+    assert "QLabel#option" in sheet
+    assert "font-weight: bold" in sheet
+    # Floating labels sit on glass chips, and the settings rows live
+    # in a glass panel, so no text floats on the artwork itself.
+    assert "QLabel#chip" in sheet
+    assert "QWidget#panel" in sheet
+    # Checkboxes are white boxes with a dark check, even on the artwork.
+    assert "QListWidget::indicator" in sheet
+    assert "check.png" in sheet
+    # The spinbox shows visible up/down arrows in their own box
+    # next to the number, like the combo chevron.
+    assert "QSpinBox::up-arrow" in sheet
+    assert "QSpinBox::down-arrow" in sheet
+    assert "up-arrow.png" in sheet
+    # The hero title has no glass box: big pastel text on the artwork.
+    assert "font-size: 36px" in sheet
+    assert "color: #b5e7a0" in sheet
+
+
+def test_down_arrow_asset_exists():
+    from pathlib import Path
+
+    assert (Path(__file__).resolve().parent.parent
+            / "src" / "gui" / "down-arrow.png").is_file()
+
+
+def test_up_arrow_asset_exists():
+    from pathlib import Path
+
+    assert (Path(__file__).resolve().parent.parent
+            / "src" / "gui" / "up-arrow.png").is_file()
+
+
+def test_check_asset_exists():
+    from pathlib import Path
+
+    assert (Path(__file__).resolve().parent.parent
+            / "src" / "gui" / "check.png").is_file()
+
+
+def test_background_asset_exists():
+    from pathlib import Path
+
+    assert (Path(__file__).resolve().parent.parent
+            / "src" / "gui" / "background.jpg").is_file()
+
+
+def test_background_blurred_pixmap_loads():
+    from src.gui.theme import background_blurred_pixmap
+
+    _app()  # QPixmap needs a QApplication
+    pix = background_blurred_pixmap()
+    assert not pix.isNull()
+    assert pix.width() > 0 and pix.height() > 0
+
+
+def test_background_pixmap_loads():
+    from src.gui.theme import background_pixmap
+
+    _app()  # QPixmap needs a QApplication
+    pix = background_pixmap()
+    assert not pix.isNull()
+    assert pix.width() > 0 and pix.height() > 0
 
 
 def test_main_window_builds_with_theme(tmp_path):
@@ -41,6 +123,14 @@ def test_main_window_builds_with_theme(tmp_path):
     assert window.process_button.objectName() == "primary"
     assert window.live_button.objectName() == "accent"
     assert window.info_label.objectName() == "info"
+    # The hero title is not a glass panel: plain text on the artwork.
+    assert all(w is not window.hero_label for w, _ in window._glass)
+    # The hero title paints a bold dark edge around its letters.
+    from src.gui.outlined_label import OutlinedLabel
+
+    assert isinstance(window.hero_label, OutlinedLabel)
+    assert window.hero_label._outline_color == "#1a1a1a"
+    assert window.hero_label._fill_alpha == 150
     # A realistic Pre-Recorded state renders without crashing.
     window._on_windows([
         ClipWindow(start=12.0, end=52.0, peak_time=30.0, score=0.91,

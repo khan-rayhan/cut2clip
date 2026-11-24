@@ -1,4 +1,4 @@
-; Inno Setup script for Cut2Clip (Windows installer).
+﻿; Inno Setup script for Cut2Clip (Windows installer).
 ; Built by the GitHub Actions workflow (.github/workflows/
 ; build-windows.yml) — it runs: iscc packaging\installer.iss
 ; from the repo root, after PyInstaller has produced
@@ -6,7 +6,7 @@
 ; exe by cut2clip.spec, so the installer only copies files.
 ; Per-user install: no admin rights needed.
 
-#define AppVersion "1.0.2"
+#define AppVersion "1.0.3"
 
 [Setup]
 AppName=Cut2Clip

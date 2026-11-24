@@ -20,7 +20,11 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 block_cipher = None
 HERE = Path(SPECPATH)
 
-datas = [(str(HERE / "models"), "models")]
+datas = [(str(HERE / "models"), "models"),
+         (str(HERE / "src" / "gui" / "down-arrow.png"), "src/gui"),
+         (str(HERE / "src" / "gui" / "up-arrow.png"), "src/gui"),
+         (str(HERE / "src" / "gui" / "check.png"), "src/gui"),
+         (str(HERE / "src" / "gui" / "background.jpg"), "src/gui")]
 
 binaries = []
 for tool in ("ffmpeg", "ffprobe"):

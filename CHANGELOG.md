@@ -1,5 +1,187 @@
 # Changelog
 
+## v1.0.3 — 2026-11-24
+
+### Added
+- Per-clip processing progress in percent: the Pre-Recorded tab
+  now shows the current clip's real progress (transcription 0–30%,
+  subject tracking and the single encode 30–100%, reported
+  frame-by-frame from the encoder), with the stage name and the
+  clip number ("Clip 1 of 3 — 47% Reframing & encoding…") in the
+  status bar. The Live monitor tab shows the same percent bar
+  while a live clip is being processed.
+- Aesthetic layout pass: a calm classic look — white theme:
+  white background, black text, solid colors only (no
+  gradients); every button now has one of four looks (black
+  primary, muted-green accent, muted-red danger, quiet outline
+  secondary for Browse); the progress bar got its own
+  full-width row with a solid steel-blue chunk; the settings
+  moved into two tidy rows (output folder on its own row,
+  model/performance/captions/device on the second).
+- Input boxes (URL, output folder, model/performance/captions/
+  device pickers, spike threshold) are white with black text;
+  the clip lists and the live log are white too. The spinbox
+  up/down buttons and the combo drop-down arrow areas are
+  white as well, so no part of an option box shows the default
+  grey.
+- The Live tab's spike threshold now shows its level next to
+  the number (Low below 2.0, Medium 2.0–3.0, High above 3.0),
+  updating as the number changes.
+- Every dropdown (Whisper model, performance, captions, device)
+  now shows a visible down chevron on its right side, so it is
+  clear it opens a list (new `src/gui/down-arrow.png` asset,
+  shipped in the installer via the spec's datas). The chevron
+  sits inside its own light-grey arrow zone with a divider
+  line, like a native dropdown.
+- Background artwork: the main window now paints the space
+  artwork (`src/gui/background.jpg`, shipped in the installer
+  via the spec's datas) as its background, cover-scaled, with
+  a slight darkening; every panel is frosted white glass over
+  it so all text stays black-on-white and readable. The
+  settings rows live in one frosted panel, the "Finished
+  Clips" label is a frosted chip, and the checkboxes are black
+  boxes with a white check (new `src/gui/check.png` asset).
+- Liquid Glass panels (Apple-style): each big panel now shows
+  the artwork genuinely blurred behind it (Gaussian-blurred
+  copy painted in the main window, plus a light white tint),
+  a bright rim around the edge, a specular highlight along
+  the top edge, and a soft shadow underneath. The clip lists
+  float directly on the tab pane's glass. True refraction
+  (bending the artwork at the panel edges) is not possible
+  in Qt, so the edges bend nothing — the blur, rim and
+  shadow carry the look.
+- The Spike threshold number now has a visible up/down arrow
+  box next to it (new `src/gui/up-arrow.png` asset; the down
+  arrow reuses the combo chevron), in its own light box with
+  a divider, like the dropdown chevrons.
+- The top "Cut2Clip" title lost its glass box: it is now
+  plain text on the artwork, bigger (36px) and pastel green
+  (#b5e7a0), with a bold dark edge around the letters (new
+  `src/gui/outlined_label.py`: the glyph path is stroked,
+  then filled) and a translucent blended fill so the artwork
+  shows through the letters.
+- Standard-library-only `src.doctor` diagnostics for Python
+  modules, FFmpeg/ffprobe, NVIDIA driver visibility, RAM-based
+  performance recommendation, and cached Whisper models.
+  Supports readable and JSON reports (`python -m src.doctor`,
+  `--json`).
+- One-click Windows setup script (`scripts/setup_windows.bat`)
+  for Python 3.12 virtual environment creation, dependency
+  installation, and system diagnostics.
+- Windows build script (`scripts/build_windows.bat`) that runs
+  diagnostics and tests, creates the portable EXE, smoke-tests
+  the packaged GUI, and optionally builds the Inno Setup
+  installer.
+- Expanded documentation for the YouTube pre-recorded workflow:
+  heatmap/comment ranking, audio/transcript fallback, per-section
+  download, Whisper transcription, vertical reframing, and MP4
+  export.
+- The GitHub Actions Windows workflow now runs the offline test
+  suite and the doctor before packaging, and the packaged-GUI
+  smoke test waits for the windowed exe and checks its exit
+  code; before, it could not fail.
+- Regression tests for each fix below
+  (`tests/test_regressions_v105.py`).
+
+### Changed
+- The Pre-Recorded progress bar used to count finished clips
+  (0 of 3, 1 of 3…); it now shows the current clip's percent,
+  and the clip count moved to the status bar text.
+- The Live tab's "Z threshold" setting is now called
+  "Spike threshold" (same numbers, same behavior, plus a tooltip
+  explaining it); the internal setting name is unchanged, so
+  saved values carry over.
+- The header bar now shows only "Cut2Clip" on the left.
+- Capitalization is now consistent: buttons, tabs, section
+  headers and dialog titles use Title Case ("Process
+  Selected", "Auto-Clip Top 3", "Start Monitoring",
+  "Pre-Recorded Clips", "Live Monitor", "Finished Clips",
+  "Nothing Selected", "No Windows", "Clip Failed"); form
+  labels stay in sentence case ("Output folder:",
+  "Spike threshold:"). The bottom option dropdowns show a
+  capital first letter ("Tiny", "Auto", "Hormozi", "TikTok",
+  "CPU", "CUDA") while the stored values stay lowercase, so
+  the pipeline and saved settings are unchanged.
+- The bottom option labels and values are bold (same font and
+  size): "Output folder:", the folder path, "Whisper model:",
+  "Performance:", "Captions:", "Device:" and their values.
+- The white boxes are now 70% transparent (30% white), so the
+  space artwork shows through them strongly; the muted text
+  was darkened and the info line and status bar made bold so
+  the text stays readable on the artwork.
+- The GUI now reports how many queued clips were saved versus
+  failed instead of implying every clip succeeded, and no
+  longer displays a duplicate failure dialog for one failed
+  clip.
+- Pre-recorded clip exports no longer silently overwrite files
+  from earlier runs; the next available filename is selected.
+- Pass-through processing (reframing and captions both
+  disabled) now copies the original video instead of moving
+  it into the output folder; same-path no-op is safe and
+  same-path processing is rejected to protect the original.
+- YouTube-backed test helpers invoke `yt_dlp` through the
+  active Python interpreter instead of assuming a Linux-only
+  `.venv/bin` path.
+- The Inno Setup script now has a UTF-8 BOM, so the Bengali
+  installer text renders correctly.
+
+### Fixed
+- **Pre-recorded clips came out empty.** The GUI created an
+  empty temp `.mp4` before downloading, and yt-dlp treats an
+  existing file as "already downloaded", so no section was
+  fetched and the pipeline got a 0-byte file. The worker now
+  downloads into a fresh folder, `download_section` forces
+  `overwrites`, and a 0-byte result is reported as an error.
+- **Live recorder failures were silent.** If ffmpeg died
+  (network drop, expired URL, stream ended) monitoring carried
+  on with an empty buffer. The monitor now detects it,
+  reconnects up to 3 times with growing delays, reports
+  progress in the log, and stops with a clear message if the
+  stream is gone.
+- **One bad clip could end all later clips.** Only
+  `RingBufferError` was caught in the clip worker; any other
+  error killed the thread. All errors are now caught, reported,
+  and monitoring continues.
+- **Busy chats fell behind.** The spike test scanned the whole
+  5-minute baseline for every chat message. It now runs twice
+  per second; every message is still counted.
+- **Live chat ending was invisible.** The GUI log now says when
+  chat stops, since spikes can no longer be detected.
+- **Muxed streamlink streams crashed URL resolution**
+  (`AttributeError: ... has no attribute 'url'`) instead of
+  falling back to yt-dlp. A `.m3u8` URL with a query string is
+  also recognised.
+- Ring-buffer clip cutting no longer breaks on folder names
+  containing an apostrophe.
+- **Captions:** a time such as 59.996 s was written as the
+  invalid `0:00:60.00`; words overlapping the next word caused
+  caption flicker; `{`, `}` and `\` in a transcript could be
+  parsed as ASS override tags.
+- **Framing:** the crop path drifted ahead of the subject when
+  `fps / sample_fps` was not a whole number (e.g. 25 fps), by
+  about a second over a 40 s clip. Sources narrower than 9:16
+  (tall phone video) were stretched; they are now cropped
+  vertically. MediaPipe's detector is closed at exit, which
+  removes a shutdown traceback.
+- **Highlights:** a peak dropped for overlapping its neighbour
+  near the start or end of a video was not replaced, so fewer
+  than N clips were offered. Invalid timestamps such as `3:75`
+  in comments are ignored.
+- The installer spec listed `down-arrow.png` twice.
+
+### Verification
+- Full suite: **99 passed, 0 failed** (7 deselected — tests
+  needing live YouTube access, Whisper model downloads, or
+  real-time playback). The 17 new regression tests fail 16 of
+  17 against the previous code, confirming the fixes address
+  real defects.
+- Real 15s end-to-end render (Rick Astley 18–33s, tiny,
+  Hormozi): 1080x1920 H.264 + AAC, exactly 15.000s, 25 words
+  transcribed, subject reframed, Hormozi captions burned in —
+  25.0s total.
+- Still untested on a real PC: live-stream run, CUDA caption
+  speed, Windows installer build, macOS build.
+
 ## v1.0.2 — 2026-11-20
 
 ### Performance

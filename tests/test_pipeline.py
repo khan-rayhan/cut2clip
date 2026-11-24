@@ -42,6 +42,10 @@ def test_process_clip_no_captions(tmp_path):
     assert abs(_duration(str(out)) - 10.0) < 0.6
 
 
+import pytest
+
+
+@pytest.mark.model_integration
 def test_process_clip_with_captions(tmp_path):
     """Full path including real transcription on CPU (tiny model).
     A pure tone transcribes to few or no words; the pipeline must
@@ -87,3 +91,56 @@ def test_process_clip_reframe_and_captions_single_output_encode(tmp_path, monkey
         ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
          "-of", "csv=p=0", str(out)], text=True).splitlines()
     assert "audio" in streams
+
+
+def test_process_clip_reports_progress(tmp_path):
+    src = tmp_path / "src.mp4"
+    _make_subject_video(str(src))
+    out = tmp_path / "vertical.mp4"
+    seen: list[tuple[float, str]] = []
+    process_clip(str(src), str(out), do_captions=False,
+                 progress_cb=lambda frac, label: seen.append((frac, label)))
+    assert out.exists()
+    assert seen, "progress_cb was never called"
+    fracs = [f for f, _ in seen]
+    assert all(0.0 <= f <= 1.0 for f in fracs)
+    assert fracs == sorted(fracs), "progress must not go backwards"
+    assert fracs[0] <= 0.05
+    assert fracs[-1] == 1.0
+    # Frame-by-frame encode progress, not just start/end markers.
+    assert len(set(fracs)) > 10
+    assert any("Reframing" in label for _, label in seen)
+
+
+def test_noop_pipeline_copies_and_preserves_original(tmp_path):
+    import hashlib
+
+    src = tmp_path / "original.mp4"
+    _make_subject_video(str(src), duration=1)
+    before = hashlib.sha256(src.read_bytes()).hexdigest()
+    out = tmp_path / "copy.mp4"
+    process_clip(str(src), str(out), do_reframe=False, do_captions=False)
+    assert src.exists()
+    assert out.exists()
+    assert hashlib.sha256(src.read_bytes()).hexdigest() == before
+    assert hashlib.sha256(out.read_bytes()).hexdigest() == before
+
+
+def test_noop_pipeline_same_path_is_safe(tmp_path):
+    src = tmp_path / "original.mp4"
+    _make_subject_video(str(src), duration=1)
+    before = src.read_bytes()
+    result = process_clip(str(src), str(src), do_reframe=False, do_captions=False)
+    assert result == str(src)
+    assert src.read_bytes() == before
+
+
+def test_processed_pipeline_rejects_same_input_output_path(tmp_path):
+    import pytest
+
+    src = tmp_path / "original.mp4"
+    _make_subject_video(str(src), duration=1)
+    before = src.read_bytes()
+    with pytest.raises(ValueError, match="must be different"):
+        process_clip(str(src), str(src), do_reframe=True, do_captions=False)
+    assert src.read_bytes() == before

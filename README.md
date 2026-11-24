@@ -21,7 +21,7 @@ Just install, paste a link, and your clips are ready. Built with the
 GSD workflow — see `.planning/`.
 
 ## Status
-- **v1.0.2** (2026-11-20) — adaptive performance profiles and single-pass video encoding. Earlier phase verification remains documented below.
+- **v1.0.3** (2026-11-24) — Per-clip progress %, classic white UI with Liquid Glass panels and space-artwork background, Windows setup/doctor/build scripts, and 16 bug fixes including the pre-recorded 0-byte download (see CHANGELOG).
 - **Phase 1 done**: ingestion plus highlight detection.
 - **Phase 2 done**: live rolling buffer plus chat spike detector
   (Z-score > 2.5, 45s cooldown, 40s clip per spike).
@@ -30,7 +30,7 @@ GSD workflow — see `.planning/`.
   Demo: `demo/rick-vertical-15s.mp4`.
 - **Phase 4 done**: PySide6 GUI plus PyInstaller packaging
   (one-file bundle, smoke-tested).
-- **Phase 5 done**: full verification — 74 tests pass, a real
+- **Phase 5 done**: full verification — 99 tests pass, a real
   40-second pre-recorded clip processed end to end
   (`demo/rick-40s-vertical.mp4`: 1080x1920, H.264/AAC, exactly
   40.000s, face-centred framing, Hormozi captions burned in).
@@ -38,20 +38,28 @@ GSD workflow — see `.planning/`.
 - Full changelog: `CHANGELOG.md`.
 
 ## Setup
+
+### Windows (recommended)
+1. Install **Python 3.12** and FFmpeg (both `ffmpeg` and `ffprobe` must be on PATH).
+2. Double-click `scripts\setup_windows.bat`. It creates `.venv`, installs dependencies, and runs the system doctor.
+3. Launch with `.venv\Scripts\python.exe -m src.gui_main` or use the Start Menu shortcut after installing the packaged release.
+
+### Linux / macOS (development)
 ```bash
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pip install pytest  # for tests
+.venv/bin/pip install -e ".[dev]"
 ```
+
+Run `python -m src.doctor` at any time to check Python packages, FFmpeg/ffprobe, NVIDIA availability, RAM-based performance recommendation, and cached Whisper models. The doctor is standard-library-only and can run even before the application dependencies are installed. The deterministic build test run excludes tests that need live YouTube access, long real-time stream playback, or first-time AI model downloads; run the full integration suite separately on a network-enabled Windows PC after the Whisper model has been downloaded.
+
 
 ## Desktop app
 ```bash
 .venv/bin/python -m src.gui_main
 ```
-Paste a URL, press Detect. A pre-recorded video shows its ranked 40-second
-highlight windows — tick the ones you want and press Process
-selected, or press Auto-clip top 3 to process the best three at
-once with no ticking. A live stream shows the monitor tab — Start monitoring
+Paste a YouTube pre-recorded video URL, press Detect. Cut2Clip reads the Most Replayed heatmap when available, boosts it with timestamped comment spikes, and falls back to streamed audio-energy plus available caption transcript signals when the heatmap is absent. It then shows ranked 40-second highlight windows. Tick the ones you want and press Process Selected, or press Auto-Clip Top 3. Each selected segment is downloaded separately, transcribed locally with Whisper, automatically reframed to 9:16, captioned, and exported as MP4. The original source is preserved, and previous exports are not silently overwritten. A live stream shows the monitor tab — Start monitoring
 and clips appear as chat spikes. Settings (output folder, Whisper model, performance mode, caption style, device, Z threshold) are remembered between runs.
 
 Pre-recorded ranking uses YouTube's Most Replayed heatmap boosted
@@ -80,8 +88,8 @@ alone is used.
 .venv/bin/python -m src.cli process input.mp4 --out vertical.mp4 --model tiny
 ```
 
-## Build the Windows exe
-See `packaging/build-windows.md`. In short:
+## Build the Windows exe and installer
+On Windows, run `scripts\build_windows.bat`. It runs the dependency doctor, the automated test suite, builds the portable EXE, performs a packaged GUI smoke test, and builds the Inno Setup installer when `iscc` is installed. For manual details, see `packaging/build-windows.md`. In short:
 ```powershell
 pyinstaller cut2clip.spec
 # -> dist\cut2clip.exe
@@ -100,9 +108,10 @@ src/
   pipeline.py     process_clip: reframe + captions for one clip
   performance.py  hardware-aware Lite/Balanced/Fast profiles and FFmpeg encoder selection
   cli.py          probe, clips, live, process commands
+  doctor.py       dependency, FFmpeg, GPU and Whisper-cache diagnostics
   gui/            PySide6 main window and QThread workers
   gui_main.py     desktop entry point (--smoke-test for packaging)
-tests/            pytest suite (74 tests, incl. offscreen GUI tests)
+tests/            pytest suite (99 passed, 7 deselected — the 7 need live YouTube, model downloads or real-time playback; incl. offscreen GUI tests)
 .planning/        PROJECT.md REQUIREMENTS.md ROADMAP.md STATE.md phase-N/PLAN.md
 packaging/        build-windows.md
 ```

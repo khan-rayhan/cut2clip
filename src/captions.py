@@ -80,11 +80,13 @@ WORDS_PER_LINE = 3
 
 def _ass_time(seconds: float) -> str:
     """Seconds to ASS time H:MM:SS.cc."""
-    seconds = max(0.0, seconds)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h}:{m:02d}:{s:05.2f}"
+    # Integer centiseconds: formatting seconds % 60 with %05.2f turned
+    # 59.996 into the invalid "60.00".
+    total = int(round(max(0.0, seconds) * 100))
+    h, rest = divmod(total, 360000)
+    m, rest = divmod(rest, 6000)
+    s, cs = divmod(rest, 100)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
 def _line_text(group: list[tuple[float, float, str]], current: int,
@@ -139,6 +141,29 @@ def _line_text(group: list[tuple[float, float, str]], current: int,
     return " ".join(parts)
 
 
+def _clean_words(words: list[tuple[float, float, str]]
+                 ) -> list[tuple[float, float, str]]:
+    """Make Whisper words safe for ASS.
+
+    ``{``, ``}`` and ``\\`` start override tags in ASS, so they are
+    replaced. A word that runs past the next word's start is trimmed
+    to it: overlapping events make libass stack two caption lines for
+    a few frames, which shows up as flicker.
+    """
+    cleaned = []
+    for start, end, word in words:
+        word = (word.replace("\\", "").replace("{", "(").replace("}", ")")
+                .replace("\n", " ").strip())
+        if word:
+            cleaned.append((start, end, word))
+    for k in range(len(cleaned) - 1):
+        start, end, word = cleaned[k]
+        next_start = cleaned[k + 1][0]
+        if next_start < end:
+            cleaned[k] = (start, max(start + 0.01, next_start), word)
+    return cleaned
+
+
 def words_to_ass(words: list[tuple[float, float, str]], out_path: str,
                  style: str = "hormozi") -> str:
     """Write an ASS file from (start, end, word) tuples. Words are
@@ -149,6 +174,7 @@ def words_to_ass(words: list[tuple[float, float, str]], out_path: str,
         raise ValueError(
             f"Unknown caption style {style!r}; "
             f"choose one of {', '.join(CAPTION_STYLES)}")
+    words = _clean_words(words)
     lines = [_ass_header(style)]
     for i in range(0, len(words), WORDS_PER_LINE):
         group = words[i:i + WORDS_PER_LINE]
@@ -228,9 +254,16 @@ def filter_path(path: str) -> str:
 
 
 def burn_captions(video_path: str, ass_path: str, output_path: str,
-                  performance_mode: str = "auto") -> str:
-    """Burn ASS subtitles with the selected, hardware-aware encoder profile."""
+                  performance_mode: str = "auto", progress_cb=None) -> str:
+    """Burn ASS subtitles with the selected, hardware-aware encoder profile.
+
+    ``progress_cb`` (optional) gets 0.0 at start and 1.0 when the
+    single ffmpeg pass finishes; the burn is one opaque ffmpeg run,
+    so there is no finer-grained progress to report.
+    """
     from .performance import ffmpeg_video_args
+    if progress_cb is not None:
+        progress_cb(0.0)
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", video_path,
            "-vf", f"ass={filter_path(ass_path)}",
            *ffmpeg_video_args(performance_mode),
@@ -238,4 +271,6 @@ def burn_captions(video_path: str, ass_path: str, output_path: str,
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg caption burn failed: {result.stderr[-300:]}")
+    if progress_cb is not None:
+        progress_cb(1.0)
     return output_path

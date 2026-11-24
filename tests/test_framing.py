@@ -1,6 +1,7 @@
 """Tests for auto-framing: pure helpers plus real video runs."""
 
 import subprocess
+import sys
 
 import pytest
 
@@ -72,14 +73,17 @@ def test_reframe_synthetic_video(tmp_path):
     assert abs(_duration(str(out)) - 10.0) < 0.6
 
 
+@pytest.mark.integration
 def test_mediapipe_finds_real_face(tmp_path):
     """Rick Astley sings facing the camera; MediaPipe should find
     his face in at least some samples."""
     src = tmp_path / "rick.mp4"
-    yt_dlp = str(__import__("pathlib").Path(__file__).parent.parent
-                 / ".venv" / "bin" / "yt-dlp")
+    try:
+        import yt_dlp  # noqa: F401
+    except ImportError:
+        pytest.skip("yt-dlp is not installed")
     dl = subprocess.run(
-        [yt_dlp, "-q", "--no-check-certificate",
+        [sys.executable, "-m", "yt_dlp", "-q", "--no-check-certificate",
          "-f", "bv*[height<=720]",
          "--download-sections", "*00:00:30-00:00:45",
          "-o", str(src),

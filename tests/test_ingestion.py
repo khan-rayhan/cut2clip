@@ -3,11 +3,14 @@
 import json
 import subprocess
 
+import pytest
+
 from src.ingestion import download_section, probe
 
 RICK_ASTLEY = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 
+@pytest.mark.integration
 def test_probe_real_vod_has_heatmap():
     info = probe(RICK_ASTLEY)
     assert info.is_live is False
@@ -27,6 +30,7 @@ def _probe_streams(path: str) -> dict:
     return json.loads(out)
 
 
+@pytest.mark.integration
 def test_download_section_cuts_exact_window(tmp_path):
     """Regression test: the section must actually be cut. An early
     version passed the CLI's "--download-sections" strings to the
@@ -45,6 +49,8 @@ def test_download_section_cuts_exact_window(tmp_path):
 
 import os
 import subprocess
+
+import pytest
 
 import pytest
 

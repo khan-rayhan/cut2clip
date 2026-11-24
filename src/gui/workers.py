@@ -6,6 +6,7 @@ fails emits ``failed`` with a message; it never raises into Qt.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import traceback
 
@@ -69,8 +70,10 @@ class ClipsWorker(QThread):
 
 class VodClipWorker(QThread):
     """Download one highlight window, then run the Phase 3 pipeline
-    on it. Emits progress lines for the log pane."""
+    on it. Emits progress lines for the log pane and ``progress_pct``
+    (percent 0-100 plus a stage label) for the progress bar."""
     progress = Signal(str)
+    progress_pct = Signal(int, str)
     finished_file = Signal(str)  # output path
     failed = Signal(str)
 
@@ -94,19 +97,26 @@ class VodClipWorker(QThread):
         try:
             self.progress.emit(
                 f"Downloading {self.window_start:.0f}-{self.window_end:.0f}s ...")
-            fd, tmp = tempfile.mkstemp(suffix=".mp4")
-            os.close(fd)
+            self.progress_pct.emit(3, "Downloading…")
+            # A fresh folder, not mkstemp: a pre-created empty file makes
+            # yt-dlp skip the download as "already downloaded".
+            tmp_dir = tempfile.mkdtemp(prefix="cut2clip-dl-")
+            tmp = os.path.join(tmp_dir, "section.mp4")
             try:
                 ingestion.download_section(self.url, self.window_start,
                                            self.window_end, tmp)
                 self.progress.emit("Downloaded. Reframing and captioning ...")
+                self.progress_pct.emit(8, "Downloaded")
+                # Download takes the first 8% of the bar; the pipeline
+                # (transcribe + reframe/encode) spans the remaining 92%.
                 process_clip(tmp, self.out_path, model=self.model,
                              caption_style=self.caption_style,
                              device=self.device, performance_mode=self.performance_mode,
-                             log=self.progress.emit)
+                             log=self.progress.emit,
+                             progress_cb=lambda frac, label: self.progress_pct.emit(
+                                 int(round(8 + 92 * frac)), label))
             finally:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
             self.finished_file.emit(self.out_path)
         except Exception as exc:
             self.failed.emit(str(exc))

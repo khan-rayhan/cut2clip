@@ -14,6 +14,7 @@ without one of them still runs.
 
 from __future__ import annotations
 
+import atexit
 import os
 import subprocess
 import tempfile
@@ -110,6 +111,21 @@ def _mediapipe_model_path() -> str:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         urllib.request.urlretrieve(_MEDIAPIPE_MODEL_URL, path)
     return path
+
+
+def close_detectors() -> None:
+    """Release the MediaPipe detector. Registered with atexit: left to
+    ``__del__`` at interpreter shutdown it raises a noisy TypeError."""
+    global _mediapipe_detector
+    detector, _mediapipe_detector = _mediapipe_detector, None
+    if detector is not None:
+        try:
+            detector.close()
+        except Exception:
+            pass
+
+
+atexit.register(close_detectors)
 
 
 def detect_faces_mediapipe(frame: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -253,7 +269,18 @@ class Framer:
         self.h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
         self.duration = self.frame_count / self.fps if self.fps else 0.0
+        # Frames between detector samples. Trajectory timing must use the
+        # real rate (fps / step): rounding the step makes it differ from
+        # sample_fps (25 fps at 2 Hz gives 2.08 Hz), so a 40 s clip's
+        # camera path drifted about a second ahead of the subject.
+        self.step = max(1, int(round(self.fps / self.sample_fps)))
         self.crop_w = int(round(self.h * 9 / 16))
+        self.crop_h = self.h
+        if self.crop_w > self.w:
+            # Source is narrower than 9:16 (tall phone footage): keep the
+            # full width and crop the height instead of stretching.
+            self.crop_w = self.w
+            self.crop_h = min(self.h, int(round(self.w * 16 / 9)))
         self.layout = "single"
         self.centers: list[float] = []  # smoothed subject centre-x per sample
 
@@ -270,7 +297,7 @@ class Framer:
         raw_centers: list[float] = []
         face_counts: list[int] = []
         frame_index = 0
-        step = max(1, int(round(self.fps / self.sample_fps)))
+        step = self.step
         try:
             while frame_index < self.frame_count:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
@@ -300,14 +327,15 @@ class Framer:
         finally:
             cap.release()
         self.centers = ema_smooth(raw_centers, self.alpha)
-        self.layout = decide_layout(face_counts, sample_fps=self.sample_fps)
+        self.layout = decide_layout(face_counts,
+                                    sample_fps=self.fps / self.step)
         return self.layout
 
     def _center_at(self, t: float) -> float:
         """Smoothed subject centre-x at time ``t`` (linear interp)."""
         if not self.centers:
             return self.w / 2
-        pos = t * self.sample_fps
+        pos = t * self.fps / self.step
         i = int(pos)
         if i >= len(self.centers) - 1:
             return self.centers[-1]
@@ -318,7 +346,8 @@ class Framer:
         cx = self._center_at(t)
         if self.layout == "single":
             x = crop_x_for_center(self.w, self.crop_w, cx)
-            crop = frame[:, x:x + self.crop_w]
+            y = (self.h - self.crop_h) // 2
+            crop = frame[y:y + self.crop_h, x:x + self.crop_w]
             return cv2.resize(crop, (OUT_W, OUT_H))
         # Split-screen: content on top, speaker on the bottom.
         top_h = int(OUT_H * SPLIT_TOP_FRAC)
@@ -331,11 +360,14 @@ class Framer:
                              (OUT_W, bottom_h))
         return np.vstack([content, speaker])
 
-    def reframe_video(self, output_path: str, ass_path: str | None = None) -> str:
+    def reframe_video(self, output_path: str, ass_path: str | None = None,
+                      progress_cb=None) -> str:
         """Stream reframed frames directly to FFmpeg for a single encode.
 
         This removes the previous intermediate MPEG-4 file and its extra
         H.264 re-encode. Original audio is muxed in the same FFmpeg pass.
+        ``progress_cb`` (optional) is called with the fraction of frames
+        fed to FFmpeg so far (0..1), throttled to whole-percent changes.
         """
         from .performance import ffmpeg_video_args, get_profile
         if not self.centers:
@@ -360,6 +392,7 @@ class Framer:
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                     stderr=err_file)
             frames_written = 0
+            last_pct = -1
             try:
                 while True:
                     ok, frame = cap.read()
@@ -368,6 +401,11 @@ class Framer:
                     out = self._reframe_frame(frame, frames_written / self.fps)
                     proc.stdin.write(memoryview(out))
                     frames_written += 1
+                    if progress_cb is not None and self.frame_count:
+                        pct = int(100 * frames_written / self.frame_count)
+                        if pct != last_pct:
+                            last_pct = pct
+                            progress_cb(frames_written / self.frame_count)
                 proc.stdin.close()
                 return_code = proc.wait()
             except Exception:

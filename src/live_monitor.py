@@ -28,6 +28,10 @@ from .ring_buffer import RingBuffer, RingBufferError, resolve_stream_url
 
 CLIP_LEN = 40.0
 LEAD = 20.0
+CHECK_INTERVAL_S = 0.5  # spike test at most this often, not per message
+RECORDER_MAX_RESTARTS = 3  # consecutive quick failures before giving up
+RECORDER_HEALTHY_S = 30.0  # a recorder that lasted this long is healthy
+RECORDER_RETRY_DELAY_S = 3.0  # grows with each consecutive failure
 SETTLE_S = 5.0  # wait past the window end before cutting. The segment
 # holding the window's tail is still being written at t+20, and its
 # packets lag the wall clock by a couple of seconds; cutting at t+22
@@ -61,6 +65,8 @@ class LiveMonitor:
         self._on_event = on_event
         self._stop = threading.Event()
         self._abort = threading.Event()  # stop processing, keep raw cuts
+        self._recorder_started = 0.0
+        self._recorder_failures = 0
         self._pending: list[tuple[float, float, str]] = []
         self._pending_lock = threading.Lock()
         self._to_process: queue.Queue = queue.Queue()
@@ -79,17 +85,32 @@ class LiveMonitor:
             self._on_event(event)
 
     def _chat_loop(self, chat_iter) -> None:
+        # Every message is recorded, but the spike test (which scans the
+        # whole baseline) runs on a timer. Running it per message cost
+        # milliseconds each and made a 100+ msg/s chat fall behind.
+        last_check = 0.0
         try:
             for _message in chat_iter:
                 if self._stop.is_set():
                     break
                 now = time.time()
                 self.velocity.feed(now)
+                if now - last_check < CHECK_INTERVAL_S:
+                    continue
+                last_check = now
                 triggered, z, count = self.velocity.check(now)
                 if triggered:
                     self._on_spike(now, z, count)
         except LiveChatError as exc:
             print(f"Chat source ended or failed: {exc}")
+            self._emit({"type": "status",
+                        "text": f"Live chat stopped: {exc}. No more spikes "
+                                f"will be detected."})
+        else:
+            if not self._stop.is_set():
+                self._emit({"type": "status",
+                            "text": "Live chat ended. No more spikes will "
+                                    "be detected."})
 
     def _on_spike(self, now: float, z: float, count: int) -> None:
         self.spikes_seen += 1
@@ -139,8 +160,13 @@ class LiveMonitor:
                     else:
                         self.buffer.extract_clip(start, end, out_path)
                         self._finish(out_path)
-                except RingBufferError as exc:
+                except Exception as exc:
+                    # Any failure (not only RingBufferError): an uncaught
+                    # error here used to kill this thread and silently end
+                    # all later clips.
                     print(f"  clip failed (buffer too short?): {exc}")
+                    self._emit({"type": "status",
+                                "text": f"Clip failed: {exc}"})
             time.sleep(1.0)
 
     def _run_process(self, raw: str, out_path: str) -> None:
@@ -149,7 +175,10 @@ class LiveMonitor:
             from .pipeline import process_clip as fn
         fn(raw, out_path, model=self.model, caption_style=self.caption_style,
            log=print, performance_mode=self.performance_mode,
-           device=self.device)
+           device=self.device,
+           progress_cb=lambda frac, label: self._emit(
+               {"type": "progress", "pct": int(round(frac * 100)),
+                "label": label}))
 
     def _keep_raw(self, raw: str, out_path: str, why: str) -> None:
         kept = out_path[:-4] + "-raw.mp4" if out_path.endswith(".mp4") else out_path + "-raw"
@@ -204,6 +233,38 @@ class LiveMonitor:
             except OSError:
                 pass
 
+    def _restart_recorder(self, stream_source: str | None) -> bool:
+        """The ffmpeg recorder died (network drop, stream ended, expired
+        URL). Try to resume it. Returns False once it should give up."""
+        old = self.buffer
+        code = getattr(old, "exit_code", None)
+        if time.time() - self._recorder_started >= RECORDER_HEALTHY_S:
+            self._recorder_failures = 0
+        self._recorder_failures += 1
+        if self._recorder_failures > RECORDER_MAX_RESTARTS:
+            self._emit({"type": "status",
+                        "text": "Stream recording stopped and could not be "
+                                "restarted (the stream may have ended). "
+                                "Stopping."})
+            return False
+        self._emit({"type": "status",
+                    "text": f"Stream recording stopped (ffmpeg exit {code}); "
+                            f"reconnecting "
+                            f"({self._recorder_failures}/{RECORDER_MAX_RESTARTS}) ..."})
+        if old is not None:
+            old.stop()
+        if self._stop.wait(RECORDER_RETRY_DELAY_S * self._recorder_failures):
+            return True
+        try:
+            source = stream_source or resolve_stream_url(self.url)
+            self.buffer = RingBuffer(source, self.segment_dir)
+            self.buffer.start()
+            self._recorder_started = time.time()
+        except Exception as exc:
+            self._emit({"type": "status",
+                        "text": f"Could not reconnect to the stream: {exc}"})
+        return True
+
     def run(self, duration_s: float | None = None,
             dry_run: bool = False,
             chat_iter=None, stream_source: str | None = None) -> list[str]:
@@ -219,6 +280,7 @@ class LiveMonitor:
         source = stream_source or resolve_stream_url(self.url)
         self.buffer = RingBuffer(source, self.segment_dir)
         self.buffer.start()
+        self._recorder_started = time.time()
         if chat_iter is None:
             chat_iter = iter_live_chat(self.url)
         chat_thread = threading.Thread(target=self._chat_loop, args=(chat_iter,),
@@ -230,6 +292,11 @@ class LiveMonitor:
             while not self._stop.is_set():
                 if duration_s is not None and time.time() - started >= duration_s:
                     break
+                if (self.buffer is not None
+                        and hasattr(self.buffer, "is_running")
+                        and not self.buffer.is_running()):
+                    if not self._restart_recorder(stream_source):
+                        break
                 time.sleep(0.5)
         except KeyboardInterrupt:
             print("Stopped by user.")

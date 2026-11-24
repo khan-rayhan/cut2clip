@@ -61,6 +61,7 @@ def test_extract_clip_from_segments(tmp_path):
     assert abs(_duration(str(out)) - 40.0) < 0.6
 
 
+@pytest.mark.slow
 def test_ring_buffer_live(tmp_path):
     src = tmp_path / "src.mp4"
     _make_test_video(str(src), duration=120)

@@ -82,17 +82,21 @@ def _rank_peaks(times: list[float], scores: list[float],
 
 def select_windows(peaks: list[tuple[float, float]], duration: float,
                    clip_len: float = CLIP_LEN,
-                   source: str = "heatmap") -> list[ClipWindow]:
+                   source: str = "heatmap",
+                   top_n: int | None = None) -> list[ClipWindow]:
     """Centre a clip on each peak, clamp inside the video, drop overlaps.
 
     ``peaks`` must already be ranked best first. Windows are returned
-    in time order.
+    in time order. With ``top_n`` it stops once that many windows are
+    kept, so a peak dropped for overlap is replaced by the next best.
     """
     if duration is None or duration <= clip_len:
         return []
     max_start = duration - clip_len
     chosen: list[ClipWindow] = []
     for peak_time, score in peaks:
+        if top_n is not None and len(chosen) >= top_n:
+            break
         start = min(max(peak_time - clip_len / 2.0, 0.0), max_start)
         end = start + clip_len
         if any(start < c.end - 0.5 and end > c.start + 0.5 for c in chosen):
@@ -136,8 +140,11 @@ def heatmap_windows(heatmap: list[HeatPoint], duration: float,
                                 + comment_weight * comment_by_time[nearest])
             norm = combined
             source = "heatmap+comments"
-    peaks = _rank_peaks(times, norm, top_n=top_n, min_gap=clip_len)
-    return select_windows(peaks, duration, clip_len, source=source)
+    # Rank extra candidates: clamping near the video's start or end can
+    # make two peaks overlap, and select_windows then needs a spare.
+    peaks = _rank_peaks(times, norm, top_n=top_n * 3, min_gap=clip_len)
+    return select_windows(peaks, duration, clip_len, source=source,
+                          top_n=top_n)
 
 
 # In YouTube comments a timestamp is mm:ss or h:mm:ss ("1:23", "1:02:03").
@@ -152,6 +159,8 @@ def parse_comment_timestamps(text: str) -> list[float]:
     seconds = []
     for match in _TIMESTAMP_RE.finditer(text or ""):
         hours, minutes, secs = match.groups()
+        if int(secs) >= 60 or (hours is not None and int(minutes) >= 60):
+            continue  # "3:75" or "1:90:00" is not a timestamp
         total = int(secs) + 60 * int(minutes)
         if hours is not None:
             total += 3600 * int(hours)
@@ -232,8 +241,9 @@ def audio_windows(audio_path: str, duration: float,
         return []
     norm = [v / peak for v in rms]
     norm = _smooth(norm, width=3)
-    peaks = _rank_peaks(times, norm, top_n=top_n, min_gap=clip_len)
-    return select_windows(peaks, duration, clip_len, source="audio")
+    peaks = _rank_peaks(times, norm, top_n=top_n * 3, min_gap=clip_len)
+    return select_windows(peaks, duration, clip_len, source="audio",
+                          top_n=top_n)
 
 
 def fetch_transcript_events(caption_url: str) -> list[tuple[float, str]]:
@@ -297,5 +307,6 @@ def combined_windows(audio_path: str, caption_url: str | None,
             source = "audio+transcript"
         except Exception:
             pass  # captions failed: fall through with audio alone
-    peaks = _rank_peaks(times, audio, top_n=top_n, min_gap=clip_len)
-    return select_windows(peaks, duration, clip_len, source=source)
+    peaks = _rank_peaks(times, audio, top_n=top_n * 3, min_gap=clip_len)
+    return select_windows(peaks, duration, clip_len, source=source,
+                          top_n=top_n)
