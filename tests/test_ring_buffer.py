@@ -65,7 +65,13 @@ def test_recorder_stderr_is_captured_when_ffmpeg_fails(tmp_path):
     """Regression: on a real Windows test (2026-11-24) the recorder
     died with "ffmpeg exit 4294967295" and no reason, because the
     windowed bundle swallows the recorder's stderr. The tail must
-    be kept so the live log can name the failure."""
+    be kept so the live log can name the failure.
+
+    Note: the refusal wording is platform-specific — Linux/macOS
+    ffmpeg says "Connection refused", Windows ffmpeg says
+    "Connection to tcp://127.0.0.1:9 failed: Error number -138
+    occurred". Either phrasing proves the stderr tail was captured.
+    """
     buf = RingBuffer("http://127.0.0.1:9/nope.m3u8", str(tmp_path / "segs"))
     buf.start()
     try:
@@ -75,7 +81,9 @@ def test_recorder_stderr_is_captured_when_ffmpeg_fails(tmp_path):
             time.sleep(0.1)
         assert not buf.is_running()
         assert buf.exit_code is not None
-        assert "Connection refused" in buf.last_stderr()
+        stderr = buf.last_stderr()
+        assert stderr, "recorder stderr must be captured"
+        assert "Connection refused" in stderr or "Error number -138" in stderr
     finally:
         buf.stop()
 

@@ -22,6 +22,10 @@
 - The status bar now says so on the first run when the Whisper
   caption model (~75 MB) is being downloaded, instead of the bar
   freezing at the transcribe step with no explanation.
+- The ring-buffer stderr test now also accepts Windows ffmpeg's
+  refusal wording ("Error number -138 occurred") alongside
+  Linux/macOS "Connection refused", so the offline test suite
+  passes on the Windows runner.
 
 ### Changed
 - The header now shows the Cut2Clip logo (`src/gui/logo.png`,
