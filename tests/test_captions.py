@@ -117,8 +117,13 @@ def test_burn_captions_with_colon_in_path(tmp_path):
 
     from src.captions import burn_captions, words_to_ass
 
-    folder = tmp_path / "dir:with:colon"
-    folder.mkdir()
+    if sys.platform == "win32":
+        # Windows forbids ':' in folder names, but every Windows path
+        # already contains one (the drive letter), so use it as-is.
+        folder = tmp_path
+    else:
+        folder = tmp_path / "dir:with:colon"
+        folder.mkdir()
     video = folder / "in.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",

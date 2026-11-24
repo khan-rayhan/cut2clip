@@ -40,7 +40,9 @@ def _make_subject_video(path, duration=10):
          "-f", "lavfi", "-i",
          f"color=c=black:size=1280x720:rate=30:duration={duration}",
          "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
-         "-vf", "drawbox=x='100+80*t':y=260:w=120:h=200:color=white:t=fill",
+         # Clamped so the box stays inside the 1280-wide frame for any t:
+         # the Windows runner's ffmpeg rejects the unclamped slide.
+         "-vf", "drawbox=x='min(100+80*t,1160)':y=260:w=120:h=200:color=white:t=fill",
          "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
          "-c:a", "aac", path],
         check=True)

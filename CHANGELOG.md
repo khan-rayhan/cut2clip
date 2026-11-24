@@ -168,6 +168,12 @@
   than N clips were offered. Invalid timestamps such as `3:75`
   in comments are ignored.
 - The installer spec listed `down-arrow.png` twice.
+- Fixed: the Windows build's offline tests failed — the
+  synthetic-video helper's drawbox slide could leave the frame on
+  the Windows runner's ffmpeg (now clamped inside the frame), and
+  the colon-in-path caption test cannot create its folder on
+  Windows (it now uses the drive-letter colon already present in
+  every Windows path).
 
 ### Verification
 - Full suite: **99 passed, 0 failed** (7 deselected — tests
