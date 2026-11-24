@@ -64,6 +64,16 @@ def process_clip(input_path: str, output_path: str,
         if do_captions:
             step = time.time()
             _emit(0.02, "Transcribing…")
+            # First run downloads the Whisper model (~75 MB) inside
+            # transcribe_words with no progress of its own, so the bar
+            # freezes at the transcribe step. Say so up front; when a
+            # model is already cached this stays silent.
+            from .doctor import _whisper_cache_status
+            _cached, _ = _whisper_cache_status()
+            if not _cached:
+                log("First run: downloading the Whisper caption model "
+                    "(about 75 MB) — the bar will pause here, then "
+                    "transcription starts.")
             words = captions.transcribe_words(input_path, model=selected_model,
                                                device=device,
                                                cpu_threads=profile.ffmpeg_threads)

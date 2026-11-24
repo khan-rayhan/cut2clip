@@ -247,10 +247,18 @@ class LiveMonitor:
                                 "restarted (the stream may have ended). "
                                 "Stopping."})
             return False
+        # The recorder's stderr tail names the real failure (a bare
+        # exit code says nothing: on Windows the recorder once died
+        # with 4294967295 and no reason at all).
+        detail = ""
+        if old is not None:
+            tail = old.last_stderr()
+            if tail:
+                detail = f" Recorder said: {tail[-500:]}"
         self._emit({"type": "status",
                     "text": f"Stream recording stopped (ffmpeg exit {code}); "
                             f"reconnecting "
-                            f"({self._recorder_failures}/{RECORDER_MAX_RESTARTS}) ..."})
+                            f"({self._recorder_failures}/{RECORDER_MAX_RESTARTS}) ...{detail}"})
         if old is not None:
             old.stop()
         if self._stop.wait(RECORDER_RETRY_DELAY_S * self._recorder_failures):

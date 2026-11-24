@@ -97,14 +97,25 @@ class VodClipWorker(QThread):
         try:
             self.progress.emit(
                 f"Downloading {self.window_start:.0f}-{self.window_end:.0f}s ...")
-            self.progress_pct.emit(3, "Downloading…")
+            # The download is the first 8% of the bar; yt-dlp's
+            # progress hook drives it, so a slow download visibly
+            # moves instead of looking frozen at 3%.
+            self.progress_pct.emit(0, "Downloading…")
+
+            def _download_progress(frac, label):
+                if frac is None:
+                    self.progress.emit(label)
+                else:
+                    self.progress_pct.emit(int(round(8 * frac)), label)
+
             # A fresh folder, not mkstemp: a pre-created empty file makes
             # yt-dlp skip the download as "already downloaded".
             tmp_dir = tempfile.mkdtemp(prefix="cut2clip-dl-")
             tmp = os.path.join(tmp_dir, "section.mp4")
             try:
                 ingestion.download_section(self.url, self.window_start,
-                                           self.window_end, tmp)
+                                           self.window_end, tmp,
+                                           progress_cb=_download_progress)
                 self.progress.emit("Downloaded. Reframing and captioning ...")
                 self.progress_pct.emit(8, "Downloaded")
                 # Download takes the first 8% of the bar; the pipeline

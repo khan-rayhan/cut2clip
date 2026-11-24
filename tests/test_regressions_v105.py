@@ -127,7 +127,7 @@ def test_vod_worker_downloads_into_a_fresh_path(tmp_path):
     QApplication.instance() or QApplication([])
     seen = {}
 
-    def fake_download(url, start, end, path):
+    def fake_download(url, start, end, path, progress_cb=None):
         seen["existed"] = os.path.exists(path)   # must NOT pre-exist
         with open(path, "wb") as fh:
             fh.write(b"x")

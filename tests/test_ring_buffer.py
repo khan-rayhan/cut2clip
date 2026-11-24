@@ -61,6 +61,25 @@ def test_extract_clip_from_segments(tmp_path):
     assert abs(_duration(str(out)) - 40.0) < 0.6
 
 
+def test_recorder_stderr_is_captured_when_ffmpeg_fails(tmp_path):
+    """Regression: on a real Windows test (2026-11-24) the recorder
+    died with "ffmpeg exit 4294967295" and no reason, because the
+    windowed bundle swallows the recorder's stderr. The tail must
+    be kept so the live log can name the failure."""
+    buf = RingBuffer("http://127.0.0.1:9/nope.m3u8", str(tmp_path / "segs"))
+    buf.start()
+    try:
+        for _ in range(100):
+            if not buf.is_running():
+                break
+            time.sleep(0.1)
+        assert not buf.is_running()
+        assert buf.exit_code is not None
+        assert "Connection refused" in buf.last_stderr()
+    finally:
+        buf.stop()
+
+
 @pytest.mark.slow
 def test_ring_buffer_live(tmp_path):
     src = tmp_path / "src.mp4"

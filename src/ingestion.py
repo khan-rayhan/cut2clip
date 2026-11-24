@@ -239,10 +239,18 @@ def _fmt_clock(seconds: float) -> str:
 
 
 def download_section(url: str, start: float, end: float,
-                     out_path: str) -> str:
+                     out_path: str,
+                     progress_cb=None) -> str:
     """Download the ``[start, end]`` seconds of a video, video and
     audio merged into one MP4. Used by the GUI to fetch one highlight
-    window before processing it."""
+    window before processing it.
+
+    ``progress_cb`` (optional) is called as ``progress_cb(frac, label)``
+    during the download, where ``frac`` is 0-1 of the section (or None
+    when yt-dlp does not know the total size yet) and ``label`` names
+    the downloaded megabytes. Without it the GUI bar sits frozen at
+    the download's start for the whole download, which reads as a
+    dead app on a slow connection."""
     # 1080p, H.264 preferred, with a fallback chain: the generic
     # "bv*+ba/b" picks VP9 webm video, whose download stalls on
     # some proxies, and an uncapped "bv*[ext=mp4]" picks the 229 MB
@@ -260,6 +268,20 @@ def download_section(url: str, start: float, end: float,
     # API wants (info_dict, ydl) -> [{"start_time", "end_time"}].
     # Passing the CLI string form (or a "download_sections" key)
     # is silently ignored and downloads the whole video.
+    def _hook(d: dict) -> None:
+        if progress_cb is None:
+            return
+        if d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            downloaded = d.get("downloaded_bytes") or 0
+            mb = downloaded / 1_000_000
+            if total:
+                progress_cb(downloaded / total,
+                            f"Downloading… {mb:.1f} MB")
+            else:
+                progress_cb(None, f"Downloading… {mb:.1f} MB")
+        elif d.get("status") == "finished":
+            progress_cb(1.0, "Downloaded")
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -269,6 +291,7 @@ def download_section(url: str, start: float, end: float,
         "download_ranges": lambda info_dict, ydl: [
             {"start_time": start, "end_time": end}],
         "force_keyframes_at_cuts": True,
+        "progress_hooks": [_hook],
         # An empty placeholder file at out_path (e.g. from mkstemp) makes
         # yt-dlp report "already downloaded" and skip the download,
         # leaving a 0-byte clip. Always replace whatever is there.

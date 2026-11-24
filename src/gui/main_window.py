@@ -14,8 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget)
 
 from .. import highlights
-from .outlined_label import OutlinedLabel
-from .theme import background_blurred_pixmap, background_pixmap
+from .theme import background_blurred_pixmap, background_pixmap, logo_pixmap
 from .workers import ClipsWorker, LiveWorker, ProbeWorker, VodClipWorker
 
 ORG = "ShortsApp"
@@ -152,10 +151,28 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.setContentsMargins(14, 12, 14, 12)
 
-        self.hero_label = OutlinedLabel(
-            "Cut2Clip", outline_color="#1a1a1a", fill_alpha=150)
+        self.hero_label = QLabel()
         self.hero_label.setObjectName("hero")
-        layout.addWidget(self.hero_label)
+        _logo = logo_pixmap()
+        if _logo.isNull():
+            self.hero_label.setText("Cut2Clip")
+        else:
+            self.hero_label.setPixmap(
+                _logo.scaledToHeight(45, Qt.SmoothTransformation))
+        self.hero_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # The tagline lives below the logo as real text (11px), so it
+        # stays crisp at any size; the spaces mimic its wide tracking.
+        self.tagline_label = QLabel(
+            "C R E A T E .  E D I T .  S H A R E .")
+        self.tagline_label.setObjectName("tagline")
+        # Logo + tagline share one tight header block so the tagline
+        # sits right under the logo, like in the original lockup.
+        header = QVBoxLayout()
+        header.setSpacing(0)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self.hero_label)
+        header.addWidget(self.tagline_label)
+        layout.addLayout(header)
 
         url_row = QHBoxLayout()
         self.url_edit = QLineEdit()

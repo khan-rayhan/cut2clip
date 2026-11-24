@@ -37,10 +37,16 @@ QComboBox { font-weight: bold; }
 QLabel#hero {
     background: transparent;
     border: none;
-    color: #b5e7a0;
-    font-size: 36px;
+    padding: 4px 0px 0px 0px;
+}
+QLabel#tagline {
+    background: transparent;
+    border: none;
+    color: #9eecf4;
+    font-size: 11px;
     font-weight: bold;
-    padding: 8px 4px;
+    margin-top: -4px;
+    padding: 0px 0px 2px 2px;
 }
 QWidget#panel {
     background: transparent;
@@ -288,6 +294,12 @@ def _check_path() -> str:
 def background_pixmap() -> QPixmap:
     """The main-window background artwork, or a null pixmap if missing."""
     path = _asset_path("background.jpg")
+    return QPixmap(path) if path else QPixmap()
+
+
+def logo_pixmap() -> QPixmap:
+    """The header logo (rounded corners baked in), or null if missing."""
+    path = _asset_path("logo.png")
     return QPixmap(path) if path else QPixmap()
 
 

@@ -24,6 +24,7 @@ datas = [(str(HERE / "models"), "models"),
          (str(HERE / "src" / "gui" / "down-arrow.png"), "src/gui"),
          (str(HERE / "src" / "gui" / "up-arrow.png"), "src/gui"),
          (str(HERE / "src" / "gui" / "check.png"), "src/gui"),
+         (str(HERE / "src" / "gui" / "logo.png"), "src/gui"),
          (str(HERE / "src" / "gui" / "background.jpg"), "src/gui")]
 
 binaries = []
@@ -79,7 +80,13 @@ hiddenimports = [
 # statically, but on Windows its __init__ also glob-loads *.dll
 # files out of its own package directory with ctypes, which static
 # analysis cannot see. collect_all ships the whole package.
-for package in ("mediapipe", "faster_whisper", "streamlink", "ctranslate2"):
+# chat-downloader has the same lazy-data problem as streamlink:
+# it opens formatting/custom_formats.json relative to its own
+# __file__ at runtime, so a bare hiddenimport leaves live chat
+# dead in the bundle with "No such file or directory ...
+# custom_formats.json" (seen on a real Windows test 2026-11-24).
+for package in ("mediapipe", "faster_whisper", "streamlink",
+                "ctranslate2", "chat_downloader"):
     tmp_ret = collect_all(package)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]

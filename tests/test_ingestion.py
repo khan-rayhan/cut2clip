@@ -85,6 +85,34 @@ def test_download_section_accepts_the_requested_length(tmp_path, monkeypatch):
     assert os.path.exists(out)
 
 
+def test_download_section_reports_download_progress(tmp_path, monkeypatch):
+    """The GUI bar drives off the download hook: without it the bar
+    sits frozen at the download's start for the whole download,
+    which reads as a dead app on a slow connection."""
+    seen = []
+    writer = _fake_extract_writing(40)
+
+    def fake(url, opts, download):
+        hook = opts["progress_hooks"][0]
+        hook({"status": "downloading", "downloaded_bytes": 2_000_000})
+        hook({"status": "downloading", "downloaded_bytes": 5_000_000,
+              "total_bytes": 10_000_000})
+        hook({"status": "downloading", "downloaded_bytes": 10_000_000,
+              "total_bytes": 10_000_000})
+        hook({"status": "finished"})
+        return writer(url, opts, download)
+
+    monkeypatch.setattr(ingestion, "_extract", fake)
+    out = str(tmp_path / "clip.mp4")
+    assert ingestion.download_section(
+        "u", 10, 50, out,
+        progress_cb=lambda frac, label: seen.append((frac, label))) == out
+    assert seen[0] == (None, "Downloading… 2.0 MB")
+    assert seen[1] == (0.5, "Downloading… 5.0 MB")
+    assert seen[2] == (1.0, "Downloading… 10.0 MB")
+    assert seen[3] == (1.0, "Downloaded")
+
+
 def test_audio_stream_source_returns_url_without_downloading(monkeypatch):
     seen = {}
 

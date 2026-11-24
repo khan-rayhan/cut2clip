@@ -10,6 +10,7 @@ segments covering ``[t-20s, t+20s]``.
 
 from __future__ import annotations
 
+import collections
 import datetime
 import os
 import re
@@ -140,6 +141,28 @@ class RingBuffer:
         self._proc: subprocess.Popen | None = None
         self._pruner: threading.Thread | None = None
         self._stop = threading.Event()
+        # ffmpeg's stderr is drained into a short tail: in the windowed
+        # bundle the recorder's stderr goes nowhere, so a dead recorder
+        # used to report only "ffmpeg exit 4294967295" with no reason.
+        self._stderr_lines: collections.deque[str] = collections.deque(maxlen=30)
+        self._stderr_thread: threading.Thread | None = None
+
+    def _drain_stderr(self) -> None:
+        """Keep ffmpeg's stderr pipe drained and remember its tail."""
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            for raw in proc.stderr:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line:
+                    self._stderr_lines.append(line)
+        except (OSError, ValueError):
+            pass
+
+    def last_stderr(self) -> str:
+        """The recorder's recent stderr output, for the live log."""
+        return "\n".join(self._stderr_lines)
 
     def start(self) -> None:
         os.makedirs(self.segment_dir, exist_ok=True)
@@ -155,9 +178,12 @@ class RingBuffer:
             os.path.join(self.segment_dir, "seg-%Y%m%dT%H%M%S.ts"),
         ]
         try:
-            self._proc = subprocess.Popen(cmd)
+            self._proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
         except FileNotFoundError as exc:
             raise RingBufferError(f"ffmpeg is not installed: {exc}") from exc
+        self._stderr_thread = threading.Thread(target=self._drain_stderr,
+                                               daemon=True)
+        self._stderr_thread.start()
         self._stop.clear()
         self._pruner = threading.Thread(target=self._prune_loop, daemon=True)
         self._pruner.start()
@@ -205,6 +231,8 @@ class RingBuffer:
                 self._proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=2)
         if self._pruner is not None:
             self._pruner.join(timeout=5)
 

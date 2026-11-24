@@ -21,7 +21,7 @@ Just install, paste a link, and your clips are ready. Built with the
 GSD workflow — see `.planning/`.
 
 ## Status
-- **v1.0.3** (2026-11-24) — Per-clip progress %, classic white UI with Liquid Glass panels and space-artwork background, Windows setup/doctor/build scripts, and 16 bug fixes including the pre-recorded 0-byte download (see CHANGELOG).
+- **v1.0.4** (2026-11-24) — Header logo (text-only wordmark with a real-text tagline), live-chat packaging fix, download progress with megabytes, and recorder error reporting (see CHANGELOG).
 - **Phase 1 done**: ingestion plus highlight detection.
 - **Phase 2 done**: live rolling buffer plus chat spike detector
   (Z-score > 2.5, 45s cooldown, 40s clip per spike).

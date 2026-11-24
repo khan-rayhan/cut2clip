@@ -1,5 +1,55 @@
 # Changelog
 
+## v1.0.4 — 2026-11-24
+
+### Fixed
+- Live chat works in the installed app now: the installer ships
+  chat-downloader's `formatting/custom_formats.json` (via
+  `collect_all("chat_downloader")` in the spec). Without it, live
+  monitoring reported "Could not open live chat ... No such file
+  or directory: .../custom_formats.json" and no spikes were ever
+  detected (found on a real Windows test, 2026-11-24).
+- When the live recorder dies, the Live log now shows ffmpeg's
+  own error text, not just its exit code: the ring buffer drains
+  the recorder's stderr into a short tail, and the reconnect
+  message includes it. A bare "ffmpeg exit 4294967295" with no
+  reason is no longer the whole story.
+- The Pre-Recorded progress bar now moves during the download:
+  yt-dlp's progress hook reports the downloaded megabytes, mapped
+  to the first 8% of the bar. Before, the bar sat frozen at the
+  download's start for the whole download, which read as a dead
+  app on a slow connection.
+- The status bar now says so on the first run when the Whisper
+  caption model (~75 MB) is being downloaded, instead of the bar
+  freezing at the transcribe step with no explanation.
+
+### Changed
+- The header now shows the Cut2Clip logo (`src/gui/logo.png`,
+  corners rounded) instead of the "Cut2Clip" text title. The logo
+  is shipped in the installer via the spec's datas. The
+  outlined-text hero (`src/gui/outlined_label.py`) is removed.
+- The header logo blends into the background artwork: its dark
+  background is transparent and its edges feather out, so no
+  tile edge shows against the artwork.
+- The header logo is now text-only: the scissors, lens, film reel
+  and other icons are removed, keeping just the "Cut2Clip" wordmark
+  and the "CREATE. EDIT. SHARE." tagline in the same 3D style.
+- The header logo is a sharp cutout now: the background is removed
+  by flood-fill (so the letters' own dark shading stays solid),
+  with crisp edges and no feathering, for a clean look on the
+  artwork.
+- The colour filled in the letters' empty spaces is removed too:
+  the "p" bowl and the tagline A/R/D counters are clear now, so
+  the artwork shows through them like the rest of the background.
+- The header logo is a little smaller now (45px tall), so the
+  header feels less dominant.
+- The "CREATE. EDIT. SHARE." tagline is real text below the logo
+  now (11px, bold, light cyan #9eecf4, wide tracking), instead of
+  part of the logo image — it was only ~5px tall inside the image
+  before. The logo image itself is the wordmark only. The tagline
+  sits tight under the logo in its own header block, pulled up
+  with a negative top margin so it hugs the wordmark.
+
 ## v1.0.3 — 2026-11-24
 
 ### Added

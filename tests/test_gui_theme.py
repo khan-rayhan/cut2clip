@@ -59,9 +59,15 @@ def test_theme_stylesheet_is_classic():
     assert "QSpinBox::up-arrow" in sheet
     assert "QSpinBox::down-arrow" in sheet
     assert "up-arrow.png" in sheet
-    # The hero title has no glass box: big pastel text on the artwork.
-    assert "font-size: 36px" in sheet
-    assert "color: #b5e7a0" in sheet
+    # The hero is the logo image: transparent, borderless, no text styling.
+    assert "QLabel#hero" in sheet
+    assert "font-size: 36px" not in sheet
+    assert "color: #b5e7a0" not in sheet
+    # The tagline below the logo is real text at 11px, pulled up
+    # tight under the logo with a negative top margin.
+    assert "QLabel#tagline" in sheet
+    assert "font-size: 11px" in sheet
+    assert "margin-top: -4px" in sheet
 
 
 def test_down_arrow_asset_exists():
@@ -76,6 +82,38 @@ def test_up_arrow_asset_exists():
 
     assert (Path(__file__).resolve().parent.parent
             / "src" / "gui" / "up-arrow.png").is_file()
+
+
+def test_logo_asset_exists():
+    from pathlib import Path
+
+    from PIL import Image
+
+    logo = (Path(__file__).resolve().parent.parent
+            / "src" / "gui" / "logo.png")
+    assert logo.is_file()
+    image = Image.open(logo).convert("RGBA")
+    # Rounded corners: the four corner pixels are transparent.
+    assert image.getpixel((0, 0))[3] == 0
+    assert image.getpixel((image.width - 1, 0))[3] == 0
+    assert image.getpixel((0, image.height - 1))[3] == 0
+    assert image.getpixel((image.width - 1, image.height - 1))[3] == 0
+    # Blended with the background: the alpha channel spans fully
+    # transparent (dark background) to fully opaque (bright letters).
+    assert image.getchannel("A").getextrema() == (0, 255)
+    # Sharp edges: few semi-transparent pixels (only the 1px edge).
+    import numpy as np
+
+    alpha = np.asarray(image.getchannel("A"))
+    mid = ((alpha > 10) & (alpha < 245)).mean()
+    assert mid < 0.10
+    # No colour filled in the letters' empty spaces (the "p" bowl and
+    # the tagline A/R/D counters): only the thin letter-outline rims
+    # may still match the navy background, never a filled blob.
+    arr = np.asarray(image).astype(np.float32)
+    navy = np.array([13.0, 22.0, 35.0])
+    dist = np.sqrt(((arr[..., :3] - navy) ** 2).sum(axis=2))
+    assert int(((arr[..., 3] > 128) & (dist < 40)).sum()) < 2500
 
 
 def test_check_asset_exists():
@@ -123,14 +161,19 @@ def test_main_window_builds_with_theme(tmp_path):
     assert window.process_button.objectName() == "primary"
     assert window.live_button.objectName() == "accent"
     assert window.info_label.objectName() == "info"
-    # The hero title is not a glass panel: plain text on the artwork.
+    assert window.tagline_label.objectName() == "tagline"
+    assert window.tagline_label.text() == (
+        "C R E A T E .  E D I T .  S H A R E .")
+    # The hero is the logo image, not a glass panel: plain on the artwork.
     assert all(w is not window.hero_label for w, _ in window._glass)
-    # The hero title paints a bold dark edge around its letters.
-    from src.gui.outlined_label import OutlinedLabel
+    # The header shows the logo (rounded corners baked in), 45px tall.
+    from PySide6.QtWidgets import QLabel
 
-    assert isinstance(window.hero_label, OutlinedLabel)
-    assert window.hero_label._outline_color == "#1a1a1a"
-    assert window.hero_label._fill_alpha == 150
+    assert isinstance(window.hero_label, QLabel)
+    assert window.hero_label.text() == ""
+    pixmap = window.hero_label.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+    assert pixmap.height() == 45
     # A realistic Pre-Recorded state renders without crashing.
     window._on_windows([
         ClipWindow(start=12.0, end=52.0, peak_time=30.0, score=0.91,
