@@ -6,7 +6,7 @@
 #      Actions tab) and the workflow builds cut2clip.exe with
 #      PyInstaller, smoke-tests it, then wraps it in a proper
 #      installer with Inno Setup.
-#   2. The installer (Cut2Clip-Setup-1.0.2.exe) is uploaded as
+#   2. The installer (Cut2Clip-Setup-<version>.exe) is uploaded as
 #      a workflow artifact, and on a tag push it is attached to
 #      a GitHub Release — that is the file the user downloads,
 #      installs, and runs. No Python, FFmpeg, venv or build
@@ -45,15 +45,28 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install -e ".[dev]"
+
+      - name: Run offline automated tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q -m "not integration and not model_integration and not slow"
+
+      - name: Check runtime dependencies
+        run: python -m src.doctor
 
       - name: Build the exe
-        run: pyinstaller cut2clip.spec
+        run: pyinstaller --clean --noconfirm cut2clip.spec
 
       - name: Smoke-test the exe
         env:
           QT_QPA_PLATFORM: offscreen
-        run: .\dist\cut2clip.exe --smoke-test
+        shell: pwsh
+        run: |
+          # A windowed exe is not waited on by the shell, so wait explicitly
+          # and check the exit code; otherwise this step can never fail.
+          $p = Start-Process -FilePath .\dist\cut2clip.exe -ArgumentList "--smoke-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Smoke test failed (exit code $($p.ExitCode))" }
 
       - name: Build the installer
         run: iscc packaging\installer.iss
